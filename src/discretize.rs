@@ -18,22 +18,68 @@ use rayon::prelude::*;
 /// clustering. At or below it, the exact unweighted PAM path runs unchanged.
 const CLUSTER_CAP: usize = 512;
 
-/// Discretize a column-major raw string matrix. Numeric columns are replaced by
-/// integer cluster labels (as strings, 1-based, ordered by medoid value).
-pub fn discretize_raw(raw: &[Vec<String>], max_clusters: usize) -> Vec<Vec<String>> {
-    raw.par_iter()
+/// Discretize numeric columns and factor-encode the result into a `Dataset`,
+/// column by column and in parallel, without ever materializing label strings.
+///
+/// Numeric columns are PAM-discretized to small integer labels then encoded;
+/// non-numeric columns are factor-encoded from their string slices. Codes match
+/// what factor-encoding the equivalent label / cell strings would produce.
+pub fn discretize_to_dataset(
+    names: Vec<String>,
+    raw: &[Vec<&str>],
+    nrow: usize,
+    max_clusters: usize,
+) -> crate::data::Dataset {
+    let encoded: Vec<(Vec<u32>, u32)> = raw
+        .par_iter()
         .map(|col| match parse_numeric(col) {
-            Some(vals) => discretize_column(&vals, max_clusters),
-            None => col.clone(),
+            Some(vals) => encode_labels(&discretize_column(&vals, max_clusters)),
+            None => crate::data::encode_col_str(col),
         })
-        .collect()
+        .collect();
+    let mut cols = Vec::with_capacity(encoded.len());
+    let mut levels = Vec::with_capacity(encoded.len());
+    for (c, l) in encoded {
+        cols.push(c);
+        levels.push(l);
+    }
+    crate::data::Dataset {
+        names,
+        cols,
+        levels,
+        nrow,
+    }
 }
 
-/// Parse a column to `f64`, with `NaN` for empty/`NA`. Returns `None` if any
-/// non-empty cell is not numeric (i.e. the column is categorical).
-fn parse_numeric(col: &[String]) -> Option<Vec<f64>> {
+/// Factor-encode per-row cluster labels (0 = NA, 1.. = cluster), matching the
+/// codes that factor-encoding the label strings ("NA", "1", ...) would give:
+/// distinct labels are ordered by their string form.
+fn encode_labels(labels: &[u8]) -> (Vec<u32>, u32) {
+    let label_str = |id: u8| -> String {
+        if id == 0 {
+            "NA".to_string()
+        } else {
+            id.to_string()
+        }
+    };
+    let mut ids: Vec<u8> = labels.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.sort_by(|&a, &b| label_str(a).cmp(&label_str(b)));
+    // Labels are small u8s -> a flat table beats a hash map over millions of cells.
+    let mut code_of = [0u32; 256];
+    for (c, &id) in ids.iter().enumerate() {
+        code_of[id as usize] = c as u32;
+    }
+    let coded: Vec<u32> = labels.iter().map(|&l| code_of[l as usize]).collect();
+    (coded, ids.len() as u32)
+}
+
+/// Parse a column of string slices to `f64`, with `NaN` for empty/`NA`. Returns
+/// `None` if any non-empty cell is not numeric (i.e. the column is categorical).
+fn parse_numeric(col: &[&str]) -> Option<Vec<f64>> {
     let mut out = Vec::with_capacity(col.len());
-    for c in col {
+    for &c in col {
         let t = c.trim();
         if t.is_empty() || t == "NA" || t == "NaN" {
             out.push(f64::NAN);
@@ -47,14 +93,16 @@ fn parse_numeric(col: &[String]) -> Option<Vec<f64>> {
     Some(out)
 }
 
-fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<String> {
+/// Discretize one numeric column into per-row labels: `0` = NA, `1..` = cluster
+/// (contiguous, ordered by ascending medoid value).
+fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<u8> {
     let n = values.len();
     let not_na: Vec<usize> = (0..n).filter(|&i| !values[i].is_nan()).collect();
 
-    // Output labels; NA stays as "NA".
-    let mut labels: Vec<String> = values
+    // Output labels; NA stays as 0, clustered rows default to 1.
+    let mut labels: Vec<u8> = values
         .iter()
-        .map(|v| if v.is_nan() { "NA".to_string() } else { "1".to_string() })
+        .map(|v| if v.is_nan() { 0u8 } else { 1u8 })
         .collect();
 
     if not_na.is_empty() {
@@ -168,7 +216,7 @@ fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<String> {
     }
     for &i in &not_na {
         if clust[i] != 0 && clust[i] <= medoids.len() {
-            labels[i] = remap[clust[i]].to_string();
+            labels[i] = remap[clust[i]] as u8;
         }
     }
     // guard against drift in clustering length

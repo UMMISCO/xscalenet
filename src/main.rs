@@ -128,17 +128,19 @@ fn info_for(method: Method) -> MethodInfo {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
-    // Load and (optionally) discretize.
-    let text = std::fs::read_to_string(&args.input)
-        .map_err(|e| format!("cannot read {}: {e}", args.input))?;
-    let (names, raw, nrow) = Dataset::parse_tsv_raw(&text)?;
-    let raw = if args.discretize {
-        eprintln!("# Discretizing numeric columns (pamk)...");
-        discretize::discretize_raw(&raw, 5)
-    } else {
-        raw
+    // Load and (optionally) discretize. The file text and the zero-copy string
+    // slices are scoped so they are freed before the (heavier) reconstruction.
+    let data = {
+        let text = std::fs::read_to_string(&args.input)
+            .map_err(|e| format!("cannot read {}: {e}", args.input))?;
+        let (names, raw, nrow) = Dataset::parse_tsv_raw(&text)?;
+        if args.discretize {
+            eprintln!("# Discretizing numeric columns (pamk)...");
+            discretize::discretize_to_dataset(names, &raw, nrow, 5)
+        } else {
+            Dataset::from_raw_columns(names, &raw, nrow)
+        }
     };
-    let data = Dataset::from_raw_columns(names, raw, nrow);
     eprintln!(
         "# Loaded {} variables x {} observations",
         data.ncol(),

@@ -38,31 +38,31 @@ impl Dataset {
 
     pub fn from_tsv_str(text: &str) -> Result<Dataset, String> {
         let (names, raw, nrow) = Dataset::parse_tsv_raw(text)?;
-        Ok(Dataset::from_raw_columns(names, raw, nrow))
+        Ok(Dataset::from_raw_columns(names, &raw, nrow))
     }
 
-    /// Parse a TSV into (names, column-major raw string cells, nrow) without
-    /// encoding. Used when discretization must run before factor-encoding.
-    pub fn parse_tsv_raw(
-        text: &str,
-    ) -> Result<(Vec<String>, Vec<Vec<String>>, usize), String> {
+    /// Parse a TSV into (names, column-major cells as string **slices** into the
+    /// input, nrow) without encoding. The slices are zero-copy borrows of `text`,
+    /// so parsing a large matrix does not allocate per cell.
+    pub fn parse_tsv_raw(text: &str) -> Result<(Vec<String>, Vec<Vec<&str>>, usize), String> {
         let mut lines = text.lines().filter(|l| !l.trim().is_empty());
         let header = lines.next().ok_or("empty input")?;
         let names: Vec<String> = header.split('\t').map(|s| s.trim().to_string()).collect();
         let ncol = names.len();
 
-        let mut raw: Vec<Vec<String>> = vec![Vec::new(); ncol];
+        let mut raw: Vec<Vec<&str>> = vec![Vec::new(); ncol];
         for (r, line) in lines.enumerate() {
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() != ncol {
-                return Err(format!(
-                    "row {} has {} fields, expected {ncol}",
-                    r + 1,
-                    fields.len()
-                ));
+            let mut nf = 0usize;
+            for (j, f) in line.split('\t').enumerate() {
+                if j >= ncol {
+                    nf = j + 1;
+                    break;
+                }
+                raw[j].push(f.trim());
+                nf = j + 1;
             }
-            for (j, f) in fields.iter().enumerate() {
-                raw[j].push(f.trim().to_string());
+            if nf != ncol {
+                return Err(format!("row {} has {nf} fields, expected {ncol}", r + 1));
             }
         }
         let nrow = raw.first().map(|c| c.len()).unwrap_or(0);
@@ -70,22 +70,14 @@ impl Dataset {
     }
 
     /// Build a dataset from column-major raw string cells by factor-encoding
-    /// each column. Levels are ordered by first appearance of the sorted unique
-    /// values so the encoding is deterministic.
-    pub fn from_raw_columns(names: Vec<String>, raw: Vec<Vec<String>>, nrow: usize) -> Dataset {
+    /// each column (codes in sorted-value order, matching R factor levels).
+    pub fn from_raw_columns(names: Vec<String>, raw: &[Vec<&str>], nrow: usize) -> Dataset {
         let mut cols = Vec::with_capacity(names.len());
         let mut levels = Vec::with_capacity(names.len());
-        for col in &raw {
-            let mut uniq: Vec<&String> = col.iter().collect();
-            uniq.sort();
-            uniq.dedup();
-            // Map value -> code in sorted order (matches R factor level ordering).
-            let coded: Vec<u32> = col
-                .iter()
-                .map(|v| uniq.binary_search(&v).unwrap() as u32)
-                .collect();
-            levels.push(uniq.len() as u32);
+        for col in raw {
+            let (coded, lv) = encode_col_str(col);
             cols.push(coded);
+            levels.push(lv);
         }
         Dataset {
             names,
@@ -114,6 +106,19 @@ impl Dataset {
 /// Pearson correlation, exposed for use with precomputed rank vectors.
 pub(crate) fn corr(x: &[f64], y: &[f64]) -> f64 {
     pearson(x, y)
+}
+
+/// Factor-encode one column of string slices: codes in sorted-value order.
+/// Returns (codes, number of levels).
+pub(crate) fn encode_col_str(col: &[&str]) -> (Vec<u32>, u32) {
+    let mut uniq: Vec<&str> = col.to_vec();
+    uniq.sort_unstable();
+    uniq.dedup();
+    let coded: Vec<u32> = col
+        .iter()
+        .map(|v| uniq.binary_search(v).unwrap() as u32)
+        .collect();
+    (coded, uniq.len() as u32)
 }
 
 /// Average ranks (ties get the mean of their positions), 1-based like R.
