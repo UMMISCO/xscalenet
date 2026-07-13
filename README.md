@@ -66,6 +66,7 @@ for a features-in-rows matrix (feature id in column 1, header = observation ids)
 | `--metrics-weighted` | off | use `|ecorr|` edge weights for metrics/ATC |
 | `--atc <annot.tsv>` | — | propagate a node annotation (ATC centrality) |
 | `--atc-col <name>` | col 2 | annotation column to propagate |
+| `--theme-network` | off | build the multi-layer theme-proximity network |
 
 Example (matches the `scs` call in the R package):
 
@@ -101,8 +102,8 @@ Transcriptional Centrality (Prifti et al. 2010) of the propagated annotation.
 With an annotation, per-module **Fisher enrichment** is also written:
 
 ```
-out/consensusGraph/globalNet_presFreq<t>/enrichment.txt
-# community  term  interest  reference  pvalue  odds  qvalue
+out/consensusGraph/globalNet_presFreq<t>/enrichment.txt      # per-module Fisher enrichment
+out/consensusGraph/globalNet_presFreq<t>/themeNetwork.txt    # theme-proximity network (--theme-network)
 ```
 
 Example:

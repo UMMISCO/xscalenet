@@ -174,6 +174,13 @@ Once a network is reconstructed, two analyses run on it (opt-in via `--metrics` 
 - **Enrichment** ([`enrichment.rs`](../src/enrichment.rs)) — per-module annotation
   over-representation via the one-sided **Fisher exact** test + **Benjamini–Hochberg**
   correction, validated against R `testEnrichment`/`p.adjust` to <1e-6.
+- **Modular centrality** — degree and betweenness computed *within* each node's
+  community (vs the total network), the modular-vs-total distinction of Prifti 2010.
+- **Multi-layer theme-proximity network** ([`multilayer.rs`](../src/multilayer.rs),
+  FunNet 2008 / R `dynamicPropagation`) — annotations are propagated (L2-normalized)
+  to convergence, then themes are linked by a self-tuning Gaussian kernel over the
+  Euclidean distances of their node-profiles: `proximity(a,b) = exp(−d²/(σ_a·σ_b))`.
+  This is the second network layer. **Validated against R to <1e-5.**
 - **Annotation Transcriptional Centrality (ATC)** — Prifti et al.,
   *Bioinformatics* 2010. Node annotations (e.g. taxonomy) are propagated over the
   network as a non-linear dynamical system: from a column-normalized node×theme

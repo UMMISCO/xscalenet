@@ -53,6 +53,7 @@ hand-rolled.
 | [`metrics.rs`](../src/metrics.rs) | topological metrics: degree, betweenness/closeness (Brandes/BFS), clustering, Louvain communities + modularity |
 | [`atc.rs`](../src/atc.rs) | Annotation Transcriptional Centrality (Prifti 2010) — annotation propagation over the network |
 | [`enrichment.rs`](../src/enrichment.rs) | Fisher over-representation test + Benjamini–Hochberg (per-module annotation enrichment) |
+| [`multilayer.rs`](../src/multilayer.rs) | multi-layer theme-proximity network (FunNet functional layer) — annotation propagation + self-tuning Gaussian theme affinity |
 | [`output.rs`](../src/output.rs) | Edge-list + node-analysis writers (buffered), formatting the typed `Network` |
 | [`util.rs`](../src/util.rs) | pair indexing (`combn` order + O(1) inverse), R-compatible number formatting |
 
