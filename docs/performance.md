@@ -58,18 +58,25 @@ sparsified Laplacian returns just the `k` smallest pairs in ~O(k·nnz).
 
 ## Fixes applied
 
-- **Buffered edge-list writers** — the writers wrote each of the millions of rows
-  with an unbuffered `writeln!` straight to the `File` (one `write()` syscall per
-  row), making large runs I/O-bound. Wrapping them in `BufWriter` (output bytes
-  unchanged) gave a **5–6× speedup at `p=500–1000`** and removed the I/O stall at
-  `p=2417`, leaving the run compute-bound.
+On the reference matrix (2417 features × 9817 obs), ARACNE, the full run went from
+effectively unusable to **25 s**:
 
-## Optimization direction (summary)
+| Change | Effect |
+|---|---|
+| **Scalable discretizer** — weighted-representative fast path for large columns + parallel columns | `--discretize` **∞ → 8.3 s** for the whole matrix; small inputs stay bit-identical |
+| **Buffered edge-list writers** (`BufWriter`) — was one `write()` syscall per row | removed the I/O stall; **>266 s → 152 s** |
+| **ecorr precompute + parallel** — rank each column once, then O(n) Pearson on ranks over present edges | **152 s → 53 s**, output bit-identical |
+| **ARACNE reuses the global MI matrix** — slice instead of rebuild per subgraph | reconstruct block **36 s → 8.5 s**; **53 s → 25 s**, bit-identical |
 
-1. Replace the discretizer and parallelize it across columns (unblocks `--discretize`).
-2. Sparse edge model + present-only output (removes the O(p²) memory/I/O).
-3. Iterative eigensolver for the `k` smallest eigenpairs (removes the O(p³) compute).
-4. Exploit the ~87% sparsity in the MI pass; parallelize the serial tails.
-5. Bound hill-climbing with a max-parents cap.
+After these, the **MI + Laplacian + eigendecomposition stage (~14.5 s)** is the
+dominant one (O(p³) eigen + O(p²·n) MI).
 
-See the (internal) roadmap for sequencing and status.
+## Remaining optimization direction
+
+1. **Iterative eigensolver** for the `k` smallest eigenpairs (removes the O(p³)
+   eigen). Note: the auto-`k` elbow heuristic needs the full spectrum, so this
+   requires either a fixed `k` or a separate cheap spectrum estimate.
+2. **Sparse edge model + present-only output** — removes the O(p²) memory
+   (1.75 GB at p=2417) and shrinks output ~6×; the memory blocker for genome-wide p.
+3. Exploit the ~87% sparsity in the MI pass; parallelize the remaining serial tails.
+4. Bound hill-climbing with a max-parents cap.
