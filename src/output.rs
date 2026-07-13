@@ -10,10 +10,15 @@ use crate::scalenet::EdgeList;
 use crate::scs::RawEdge;
 use crate::util::fmt;
 
-/// Write a full scaleNet edge list (all node pairs, combn order). Present edges
-/// come from the sparse map; absent pairs are emitted as NA / 0 on the fly, so
-/// the output is byte-identical to the dense version without materializing it.
-pub fn write_edge_list(path: &Path, data: &Dataset, el: &EdgeList) -> std::io::Result<()> {
+/// Write a scaleNet edge list. By default every node pair is emitted (present
+/// edges from the sparse map, absent pairs as NA / 0 on the fly — byte-identical
+/// to the dense layout). With `edges_only`, only present edges are written.
+pub fn write_edge_list(
+    path: &Path,
+    data: &Dataset,
+    el: &EdgeList,
+    edges_only: bool,
+) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -34,7 +39,10 @@ pub fn write_edge_list(path: &Path, data: &Dataset, el: &EdgeList) -> std::io::R
                     fmt(rec.eorient),
                     fmt(rec.ecorr),
                 )?,
-                None => writeln!(f, "{xa}_<<_{yb}\t{xa}\t{yb}\tNA\t0\tNA\tNA\tNA")?,
+                None if !edges_only => {
+                    writeln!(f, "{xa}_<<_{yb}\t{xa}\t{yb}\tNA\t0\tNA\tNA\tNA")?
+                }
+                None => {}
             }
             idx += 1;
         }

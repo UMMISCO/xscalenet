@@ -13,6 +13,8 @@ path = "src/main.rs"
 nalgebra = "0.33"
 rayon = "1.10"
 libm = "0.2"
+# Pure-Rust gzip (miniz_oxide backend) so `.gz` input works with no system deps.
+flate2 = "1"
 
 [profile.release]
 opt-level = 3

@@ -10,18 +10,17 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::recon::SubEdge;
 
-/// Imaginary sample size for BDeu (bnlearn's `iss` default is 1).
-const ISS: f64 = 1.0;
-
 struct Scorer<'a> {
     cols: Vec<&'a [u32]>,
     levels: Vec<u32>,
     nrow: usize,
+    /// Imaginary sample size for BDeu (bnlearn's `iss` default is 1).
+    iss: f64,
     cache: HashMap<(usize, Vec<usize>), f64>,
 }
 
 impl<'a> Scorer<'a> {
-    fn new(sub: &[usize], cols: &'a [Vec<u32>], levels: &[u32]) -> Scorer<'a> {
+    fn new(sub: &[usize], cols: &'a [Vec<u32>], levels: &[u32], iss: f64) -> Scorer<'a> {
         let sub_cols: Vec<&[u32]> = sub.iter().map(|&g| cols[g].as_slice()).collect();
         let sub_levels: Vec<u32> = sub.iter().map(|&g| levels[g]).collect();
         let nrow = sub_cols.first().map(|c| c.len()).unwrap_or(0);
@@ -29,6 +28,7 @@ impl<'a> Scorer<'a> {
             cols: sub_cols,
             levels: sub_levels,
             nrow,
+            iss,
             cache: HashMap::new(),
         }
     }
@@ -53,8 +53,8 @@ impl<'a> Scorer<'a> {
             q = q.saturating_mul(self.levels[p] as usize);
         }
 
-        let alpha_ij = ISS / q as f64;
-        let alpha_ijk = ISS / (q as f64 * r_c as f64);
+        let alpha_ij = self.iss / q as f64;
+        let alpha_ijk = self.iss / (q as f64 * r_c as f64);
         let lg_alpha_ij = libm::lgamma(alpha_ij);
         let lg_alpha_ijk = libm::lgamma(alpha_ijk);
 
@@ -150,7 +150,7 @@ impl Rng {
 
 /// Greedy hill climbing from the current DAG state until no move improves the
 /// score. Mutates `dag`; returns the resulting total score.
-fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize) -> f64 {
+fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize, maxp: usize) -> f64 {
     let m = dag.m;
     let mut score = dag.total_score(sc);
     for _ in 0..max_iter {
@@ -180,7 +180,8 @@ fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize) -> f64 {
                     dag.edge[from][to] = false;
                     let acyclic = !dag.reachable(from, to);
                     dag.edge[from][to] = true;
-                    if acyclic {
+                    // Reversal gives `from` a new parent `to`; respect maxp.
+                    if acyclic && dag.parents_of(from).len() < maxp {
                         // delta = change on `to` (lose parent from) + change on
                         // `from` (gain parent to)
                         let del_to = del; // score(to | p_to\{from}) - score(to | p_to)
@@ -196,8 +197,9 @@ fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize) -> f64 {
                     }
                 } else if !dag.edge[to][from] {
                     // No arc between the two in either direction: consider ADD.
-                    // Adding from->to is acyclic iff `to` does not reach `from`.
-                    if !dag.reachable(to, from) {
+                    // Adding from->to is acyclic iff `to` does not reach `from`,
+                    // and only if `to` has fewer than maxp parents.
+                    if dag.parents_of(to).len() < maxp && !dag.reachable(to, from) {
                         let mut p_to = dag.parents_of(to);
                         let base_to = sc.local(to, &p_to);
                         p_to.push(from);
@@ -273,6 +275,9 @@ pub fn reconstruct(
     levels: &[u32],
     restarts: usize,
     seed: u64,
+    max_iter: usize,
+    iss: f64,
+    maxp: usize,
 ) -> Vec<SubEdge> {
     let m = sub.len();
     if m < 2 {
@@ -285,12 +290,11 @@ pub fn reconstruct(
     }
     let sub_active: Vec<usize> = active.iter().map(|&i| sub[i]).collect();
 
-    let mut sc = Scorer::new(&sub_active, cols, levels);
+    let mut sc = Scorer::new(&sub_active, cols, levels, iss);
     let ma = sub_active.len();
-    let max_iter = 10_000;
 
     let mut best = Dag::empty(ma);
-    let mut best_score = climb(&mut best, &mut sc, max_iter);
+    let mut best_score = climb(&mut best, &mut sc, max_iter, maxp);
 
     let mut rng = Rng(seed | 1);
     for _ in 0..restarts {
@@ -300,7 +304,7 @@ pub fn reconstruct(
             edge: best.edge.clone(),
         };
         perturb(&mut cand, &mut rng, 1);
-        let s = climb(&mut cand, &mut sc, max_iter);
+        let s = climb(&mut cand, &mut sc, max_iter, maxp);
         if s > best_score + 1e-10 {
             best_score = s;
             best = cand;

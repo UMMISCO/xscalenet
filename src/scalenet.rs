@@ -39,6 +39,9 @@ pub struct Params {
     // bayes_hc
     pub restart: usize,
     pub seed: u64,
+    pub max_iter: usize,
+    pub iss: f64,
+    pub maxp: usize,
 }
 
 /// The per-pair values for one present edge (`NaN` = NA). Presence is implicit:
@@ -171,6 +174,9 @@ pub fn run_method(
                 &data.levels,
                 params.restart,
                 params.seed.wrapping_add(idx as u64),
+                params.max_iter,
+                params.iss,
+                params.maxp,
             ),
         })
         .collect();
