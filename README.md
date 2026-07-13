@@ -62,6 +62,10 @@ for a features-in-rows matrix (feature id in column 1, header = observation ids)
 | `--maxp` | unlimited | max parents per node (hill-climbing) |
 | `--max-iter` | `10000` | hill-climbing iteration cap |
 | `--iss` | `1.0` | BDeu imaginary sample size |
+| `--metrics` | off | per-node topological metrics on the consensus network |
+| `--metrics-weighted` | off | use `|ecorr|` edge weights for metrics/ATC |
+| `--atc <annot.tsv>` | — | propagate a node annotation (ATC centrality) |
+| `--atc-col <name>` | col 2 | annotation column to propagate |
 
 Example (matches the `scs` call in the R package):
 
@@ -84,6 +88,20 @@ out/consensusGraph/globalNet_presFreq<t>/edgesList.consensus.rawAvg.txt
 ```
 
 Edge-list columns: `x  y  epresenceScore  epresence  eorientScore  eorient  ecorr`.
+
+With `--metrics` / `--atc`, a per-node table is also written:
+
+```
+out/consensusGraph/globalNet_presFreq<t>/nodeAnalysis.txt
+# node  degree  strength  betweenness  closeness  clustering  community  atc
+```
+
+`community` is a Louvain module id; `atc` is the Annotation Transcriptional
+Centrality (Prifti et al. 2010) of the propagated annotation. Example:
+
+```sh
+xscalenet net.tsv out --discretize --metrics --atc taxonomy.tsv --atc-col genus
+```
 
 ## Validation
 

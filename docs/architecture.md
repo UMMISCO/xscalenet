@@ -50,7 +50,9 @@ hand-rolled.
 | [`hc.rs`](../src/hc.rs) | Bayesian hill-climbing, BDeu score, xorshift64\* PRNG |
 | [`recon.rs`](../src/recon.rs) | `SubEdge` type + orientation convention |
 | [`scs.rs`](../src/scs.rs) | Spectral Consensus Strategy (normalized-rank fusion) |
-| [`output.rs`](../src/output.rs) | Edge-list writers (buffered), formatting the typed `Network` |
+| [`metrics.rs`](../src/metrics.rs) | topological metrics: degree, betweenness/closeness (Brandes/BFS), clustering, Louvain communities + modularity |
+| [`atc.rs`](../src/atc.rs) | Annotation Transcriptional Centrality (Prifti 2010) — annotation propagation over the network |
+| [`output.rs`](../src/output.rs) | Edge-list + node-analysis writers (buffered), formatting the typed `Network` |
 | [`util.rs`](../src/util.rs) | pair indexing (`combn` order + O(1) inverse), R-compatible number formatting |
 
 ## Library API

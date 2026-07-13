@@ -162,3 +162,20 @@ method alone.
 | restarts | `--restart` | `21` | hill-climbing random restarts |
 | seed | `--seed` | `6196` | PRNG seed |
 | discretize | `--discretize` | off | PAM-discretize numeric columns first |
+
+## 7. Downstream analysis (metrics + ATC)
+
+Once a network is reconstructed, two analyses run on it (opt-in via `--metrics` /
+`--atc`, in [`metrics.rs`](../src/metrics.rs) and [`atc.rs`](../src/atc.rs)):
+
+- **Topological metrics** — degree, strength (weighted degree), betweenness and
+  closeness centrality, local/global clustering, connected components, and
+  **Louvain communities** with modularity.
+- **Annotation Transcriptional Centrality (ATC)** — Prifti et al.,
+  *Bioinformatics* 2010. Node annotations (e.g. taxonomy) are propagated over the
+  network as a non-linear dynamical system: from a binary node×theme membership
+  `T⁰`, iterate `Tᵖ = A·Tᵖ⁻¹` with per-theme column normalization until the
+  **co-inertia** of consecutive configurations converges; each node's ATC score
+  is `Σ_p ‖Δrowᵢ‖ · (1 − co-inertiaₚ)`, quantifying its influence on how
+  annotations flow through the network. This is the "functional layer" step of
+  the FunNet two-layer model (Prifti et al., *Bioinformatics* 2008).
