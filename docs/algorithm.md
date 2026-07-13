@@ -171,6 +171,9 @@ Once a network is reconstructed, two analyses run on it (opt-in via `--metrics` 
 - **Topological metrics** — degree, strength (weighted degree), betweenness and
   closeness centrality, local/global clustering, connected components, and
   **Louvain communities** with modularity.
+- **Enrichment** ([`enrichment.rs`](../src/enrichment.rs)) — per-module annotation
+  over-representation via the one-sided **Fisher exact** test + **Benjamini–Hochberg**
+  correction, validated against R `testEnrichment`/`p.adjust` to <1e-6.
 - **Annotation Transcriptional Centrality (ATC)** — Prifti et al.,
   *Bioinformatics* 2010. Node annotations (e.g. taxonomy) are propagated over the
   network as a non-linear dynamical system: from a column-normalized node×theme

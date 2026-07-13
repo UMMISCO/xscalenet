@@ -96,8 +96,16 @@ out/consensusGraph/globalNet_presFreq<t>/nodeAnalysis.txt
 # node  degree  strength  betweenness  closeness  clustering  community  atc
 ```
 
-`community` is a Louvain module id; `atc` is the Annotation Transcriptional
-Centrality (Prifti et al. 2010) of the propagated annotation. Example:
+`community` is a Louvain module id; `atc`/`atc_last` are the Annotation
+Transcriptional Centrality (Prifti et al. 2010) of the propagated annotation.
+With an annotation, per-module **Fisher enrichment** is also written:
+
+```
+out/consensusGraph/globalNet_presFreq<t>/enrichment.txt
+# community  term  interest  reference  pvalue  odds  qvalue
+```
+
+Example:
 
 ```sh
 xscalenet net.tsv out --discretize --metrics --atc taxonomy.tsv --atc-col genus
