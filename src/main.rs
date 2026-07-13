@@ -204,7 +204,7 @@ fn run() -> Result<(), String> {
         output::write_raw_consensus(&base.join("edgesList.consensus.rawAvg.txt"), &data, &raw)
             .map_err(|e| format!("write consensus raw: {e}"))?;
 
-        let n_edges = cons.epresence.iter().filter(|&&p| p == 1).count();
+        let n_edges = cons.len();
         eprintln!("# Consensus @ presFreq {thr}: {n_edges} edges");
     }
 

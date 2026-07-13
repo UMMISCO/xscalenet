@@ -41,25 +41,42 @@ pub struct Params {
     pub seed: u64,
 }
 
-/// A scaleNet-style edge table over all node pairs (combn order).
+/// The per-pair values for one present edge (`NaN` = NA). Presence is implicit:
+/// a pair is present iff it has a record in the [`EdgeList`].
+#[derive(Clone, Default)]
+pub struct EdgeRec {
+    pub eorient: f64,
+    pub epresence_score: f64,
+    pub eorient_score: f64, // only set by consensus
+    pub ecorr: f64,
+}
+
+/// A scaleNet-style edge table, stored **sparsely**: only present edges are
+/// materialized, keyed by their `combn` pair index. This keeps memory O(#edges)
+/// instead of O(p²) while producing the same full-pair output (absent pairs are
+/// emitted as NA on the fly).
 pub struct EdgeList {
-    pub epresence: Vec<u8>,
-    pub eorient: Vec<f64>,        // NaN = NA
-    pub epresence_score: Vec<f64>, // NaN = NA
-    pub eorient_score: Vec<f64>,   // NaN = NA (only used by consensus)
-    pub ecorr: Vec<f64>,           // NaN = NA
+    pub p: usize,
+    pub edges: HashMap<usize, EdgeRec>,
 }
 
 impl EdgeList {
-    fn empty(p: usize) -> EdgeList {
-        let n = npairs(p);
+    pub fn new(p: usize) -> EdgeList {
         EdgeList {
-            epresence: vec![0; n],
-            eorient: vec![f64::NAN; n],
-            epresence_score: vec![f64::NAN; n],
-            eorient_score: vec![f64::NAN; n],
-            ecorr: vec![f64::NAN; n],
+            p,
+            edges: HashMap::new(),
         }
+    }
+    /// Number of present edges.
+    pub fn len(&self) -> usize {
+        self.edges.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
+    }
+    /// Record for `idx`, if the pair is present.
+    pub fn get(&self, idx: usize) -> Option<&EdgeRec> {
+        self.edges.get(&idx)
     }
 }
 
@@ -160,7 +177,11 @@ pub fn run_method(
         })
         .collect();
 
-    // Gather: presence / forward / backward / possible counts per pair.
+    // Gather: presence / forward / backward / possible counts per pair. These
+    // are dense u32 arrays because, with overlapping subgraphs, most pairs are
+    // "possible" — dense arrays are both faster and smaller than a hash map at
+    // this coverage. They are transient; the persistent per-threshold edge lists
+    // built below are sparse.
     let n = npairs(p);
     let mut presence = vec![0u32; n];
     let mut forward = vec![0u32; n];
@@ -169,7 +190,6 @@ pub fn run_method(
     let mut scores: HashMap<usize, Vec<f64>> = HashMap::new();
 
     for (sub, edges) in prep.subgraphs.iter().zip(results.iter()) {
-        // Every pair within the subset is "possible" (visited).
         for i in 0..sub.len() {
             for j in (i + 1)..sub.len() {
                 possible[pair_index(sub[i], sub[j], p)] += 1;
@@ -189,47 +209,45 @@ pub fn run_method(
         }
     }
 
-    // presence.freq and presence.ort per pair.
-    let mut freq = vec![f64::NAN; n];
-    let mut pres_ort = vec![f64::NAN; n];
-    for idx in 0..n {
-        if possible[idx] > 0 {
-            freq[idx] = presence[idx] as f64 / possible[idx] as f64;
-        }
-        if freq[idx] > 0.0 {
-            pres_ort[idx] = if forward[idx] > backward[idx] {
-                2.0
-            } else if backward[idx] > forward[idx] {
-                -2.0
-            } else {
-                1.0
-            };
-        }
-    }
-
     // Averaged presence score (mean over unique observed values), like convert.
-    let mut avg_score = vec![f64::NAN; n];
-    for (&idx, vals) in &scores {
-        let mut uniq: Vec<f64> = vals.clone();
-        // unique() then mean (R uses unique on the concatenated strings)
-        uniq.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut avg_score: HashMap<usize, f64> = HashMap::with_capacity(scores.len());
+    for (idx, vals) in scores {
+        let mut uniq = vals;
+        uniq.sort_by(|x, y| x.partial_cmp(y).unwrap());
         uniq.dedup();
-        avg_score[idx] = uniq.iter().sum::<f64>() / uniq.len() as f64;
+        avg_score.insert(idx, uniq.iter().sum::<f64>() / uniq.len() as f64);
     }
 
-    // Build one edge list per threshold.
+    // Build one sparse edge list per threshold: only pairs with freq >= thr.
     params
         .pres_freq_thresh
         .iter()
         .map(|&thr| {
-            let mut el = EdgeList::empty(p);
+            let mut el = EdgeList::new(p);
             for idx in 0..n {
-                if freq[idx].is_nan() || freq[idx] < thr {
+                if possible[idx] == 0 {
                     continue;
                 }
-                el.epresence[idx] = 1;
-                el.eorient[idx] = pres_ort[idx]; // 1 / 2 / -2
-                el.epresence_score[idx] = avg_score[idx];
+                let freq = presence[idx] as f64 / possible[idx] as f64;
+                if freq < thr {
+                    continue;
+                }
+                let pres_ort = if forward[idx] > backward[idx] {
+                    2.0
+                } else if backward[idx] > forward[idx] {
+                    -2.0
+                } else {
+                    1.0
+                };
+                el.edges.insert(
+                    idx,
+                    EdgeRec {
+                        eorient: pres_ort, // 1 / 2 / -2
+                        epresence_score: *avg_score.get(&idx).unwrap_or(&f64::NAN),
+                        eorient_score: f64::NAN,
+                        ecorr: f64::NAN,
+                    },
+                );
             }
             el
         })
@@ -241,23 +259,10 @@ pub fn run_method(
 /// edges are visited and their correlations are computed in parallel.
 pub fn fill_ecorr(data: &Dataset, ranks: &[Vec<f64>], el: &mut EdgeList) {
     let p = data.ncol();
-    // Enumerate present edges (cheap O(p²) scan; ~#edges pushed).
-    let mut present: Vec<(usize, usize, usize)> = Vec::new();
-    let mut idx = 0usize;
-    for a in 0..p {
-        for b in (a + 1)..p {
-            if el.epresence[idx] == 1 {
-                present.push((idx, a, b));
-            }
-            idx += 1;
-        }
-    }
-    // Pearson on precomputed ranks == Spearman on the codes; parallel over edges.
-    let vals: Vec<(usize, f64)> = present
-        .par_iter()
-        .map(|&(i, a, b)| (i, crate::data::corr(&ranks[a], &ranks[b])))
-        .collect();
-    for (i, v) in vals {
-        el.ecorr[i] = v;
-    }
+    // Pearson on precomputed ranks == Spearman on the codes; parallel over the
+    // (sparse) present edges.
+    el.edges.par_iter_mut().for_each(|(&idx, rec)| {
+        let (a, b) = crate::util::pair_at(idx, p);
+        rec.ecorr = crate::data::corr(&ranks[a], &ranks[b]);
+    });
 }
