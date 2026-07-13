@@ -44,10 +44,16 @@ close transliteration of one or more R source files.
 
 Known differences:
 
-- **`ecorr` sign** flips on ~25% of ARACNE edges. The discretization produces the
-  *same partition* (hence identical MI and ARACNE structure) but assigns cluster
-  labels in a different value-order for some columns; because `ecorr` is a
-  rank-based Spearman on those labels, its sign reverses. Tracked for a fix.
+- **`ecorr` sign** differs from the R fixture on ~25% of ARACNE edges (same
+  magnitude, opposite sign). Verified against the sign of Spearman on the
+  **original** values: xscalenet matches it on **205/205** present edges, the R
+  fixture on only **154/205**. xscalenet orders cluster labels ascending by medoid
+  value, so its codes are value-monotonic and its `ecorr` sign is correct; R's
+  labeling is not always ascending, so R's fixture carries the flipped signs.
+  **This is an R issue, not an xscalenet bug.** (One real edge case remains: the
+  *non-discretized* path encodes by string order, so raw multi-digit numeric input
+  — a misuse, since continuous data should be discretized — could invert a sign;
+  the discretized and small-integer paths are value-correct.)
 - **bayes_hc structure** (~20% of edges) differs because hand-rolled hill-climbing
   diverges from `bnlearn` in restart RNG, move tie-breaking, and search order —
   Bayesian-network structure search is sensitive to all three. This is expected of

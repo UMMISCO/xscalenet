@@ -75,7 +75,7 @@ impl Dataset {
         let mut cols = Vec::with_capacity(names.len());
         let mut levels = Vec::with_capacity(names.len());
         for col in raw {
-            let (coded, lv) = encode_col_str(col);
+            let (coded, lv) = encode_col_numeric_aware(col);
             cols.push(coded);
             levels.push(lv);
         }
@@ -119,6 +119,31 @@ pub(crate) fn encode_col_str(col: &[&str]) -> (Vec<u32>, u32) {
         .map(|v| uniq.binary_search(v).unwrap() as u32)
         .collect();
     (coded, uniq.len() as u32)
+}
+
+/// Factor-encode a column, ordering **numeric** columns by numeric value (like
+/// R's `factor()` on a numeric vector) and others by string. This keeps the
+/// level codes monotonic with value for numeric input, so the Spearman-based
+/// `ecorr` sign is correct even for multi-digit values (`"10"` vs `"2"`).
+/// Binary / single-digit columns encode identically under either order.
+pub(crate) fn encode_col_numeric_aware(col: &[&str]) -> (Vec<u32>, u32) {
+    let nums: Option<Vec<f64>> = col
+        .iter()
+        .map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+        .collect();
+    match nums {
+        Some(vals) => {
+            let mut uniq = vals.clone();
+            uniq.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            uniq.dedup();
+            let coded: Vec<u32> = vals
+                .iter()
+                .map(|v| uniq.binary_search_by(|u| u.partial_cmp(v).unwrap()).unwrap() as u32)
+                .collect();
+            (coded, uniq.len() as u32)
+        }
+        None => encode_col_str(col),
+    }
 }
 
 /// Average ranks (ties get the mean of their positions), 1-based like R.
