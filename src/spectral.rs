@@ -21,6 +21,11 @@ pub struct Spectral {
     pub k: usize,
     /// All eigenvalues (ascending), before truncation.
     pub eigenvalues: Vec<f64>,
+    /// The global mutual-information affinity matrix (`p × p`, global column
+    /// indices, before the zero-degree filter). Retained so ARACNE can slice it
+    /// instead of recomputing per subgraph — `MI(i, j)` is over all rows, so the
+    /// slice equals a freshly built subset MIM.
+    pub mim: Vec<Vec<f64>>,
 }
 
 /// Compute the spectral embedding.
@@ -108,6 +113,7 @@ pub fn compute(
         eigenvectors,
         k,
         eigenvalues,
+        mim: w,
     })
 }
 

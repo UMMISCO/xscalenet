@@ -149,7 +149,7 @@ pub fn run_method(
         .par_iter()
         .enumerate()
         .map(|(idx, sub)| match method {
-            Method::Aracne => aracne::reconstruct(sub, &data.cols, &data.levels, params.epsilon),
+            Method::Aracne => aracne::reconstruct(sub, &prep.spectral.mim, params.epsilon),
             Method::BayesHc => hc::reconstruct(
                 sub,
                 &data.cols,
