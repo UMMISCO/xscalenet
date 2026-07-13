@@ -67,6 +67,7 @@ for a features-in-rows matrix (feature id in column 1, header = observation ids)
 | `--atc <annot.tsv>` | — | propagate a node annotation (ATC centrality) |
 | `--atc-col <name>` | col 2 | annotation column to propagate |
 | `--theme-network` | off | build the multi-layer theme-proximity network |
+| `--json` | off | also export `graph.json` (nodes+metrics+edges+theme layer) |
 
 Example (matches the `scs` call in the R package):
 
@@ -104,7 +105,10 @@ With an annotation, per-module **Fisher enrichment** is also written:
 ```
 out/consensusGraph/globalNet_presFreq<t>/enrichment.txt      # per-module Fisher enrichment
 out/consensusGraph/globalNet_presFreq<t>/themeNetwork.txt    # theme-proximity network (--theme-network)
+out/consensusGraph/globalNet_presFreq<t>/graph.json          # self-contained graph for web/IntegraNet (--json)
 ```
+
+See [docs/integration.md](docs/integration.md) for the library API and JSON schema.
 
 Example:
 

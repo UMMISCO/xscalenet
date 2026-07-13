@@ -20,7 +20,9 @@ embedded reconstruction methods into one robust network.
    parallelism lives.
 3. **[r-mapping.md](r-mapping.md)** — how each Rust module maps to the original R
    package, what is faithfully reproduced, and what is intentionally out of scope.
-4. **[performance.md](performance.md)** — the cost model per stage, the known
+4. **[integration.md](integration.md)** — the library API (`run`/`analyze`) and the
+   `graph.json` interchange format for a web frontend / IntegraNet.
+5. **[performance.md](performance.md)** — the cost model per stage, the known
    bottlenecks, and the optimization direction.
 
 ## Quick start
