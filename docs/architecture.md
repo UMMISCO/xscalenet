@@ -37,37 +37,54 @@ hand-rolled.
 
 | Module | Responsibility |
 |---|---|
-| [`main.rs`](../src/main.rs) | CLI parsing, orchestration, per-method/threshold output wiring |
+| [`lib.rs`](../src/lib.rs) | crate root; re-exports the public API |
+| [`pipeline.rs`](../src/pipeline.rs) | `run(data, config, progress) -> PipelineResult` — the library entry point (no I/O) |
+| [`network.rs`](../src/network.rs) | typed domain model: `Network`, `Edge`, `Orientation`, `Consensus`, `PipelineResult` |
+| [`main.rs`](../src/main.rs) | thin CLI: parse args, load/discretize, call `pipeline::run`, format |
 | [`data.rs`](../src/data.rs) | TSV load, factor-encoding to integer levels, Spearman on codes |
 | [`discretize.rs`](../src/discretize.rs) | Optional PAM/`pamk` discretization of numeric columns |
 | [`mi.rs`](../src/mi.rs) | Miller–Madow mutual-information matrix (`build_mim`) |
 | [`spectral.rs`](../src/spectral.rs) | Random-walk Laplacian, eigendecomposition, elbow `k` heuristic |
-| [`scalenet.rs`](../src/scalenet.rs) | `prepare` (subgraphs), `run_method` (reconstruct + gather), `fill_ecorr` |
+| [`scalenet.rs`](../src/scalenet.rs) | `prepare` (subgraphs), `run_method` (reconstruct + gather), `fill_ecorr`; internal `EdgeList` |
 | [`aracne.rs`](../src/aracne.rs) | ARACNE with Data Processing Inequality |
 | [`hc.rs`](../src/hc.rs) | Bayesian hill-climbing, BDeu score, xorshift64\* PRNG |
 | [`recon.rs`](../src/recon.rs) | `SubEdge` type + orientation convention |
 | [`scs.rs`](../src/scs.rs) | Spectral Consensus Strategy (normalized-rank fusion) |
-| [`output.rs`](../src/output.rs) | Edge-list writers (buffered) |
-| [`util.rs`](../src/util.rs) | pair indexing (`combn` order), R-compatible number formatting |
-| [`lib.rs`](../src/lib.rs) | module declarations |
+| [`output.rs`](../src/output.rs) | Edge-list writers (buffered), formatting the typed `Network` |
+| [`util.rs`](../src/util.rs) | pair indexing (`combn` order + O(1) inverse), R-compatible number formatting |
+
+## Library API
+
+The pipeline is usable as a library, decoupled from I/O:
+
+```rust
+let data = /* build a Dataset from a TSV / discretize */;
+let config = RunConfig { methods, params };
+let result: PipelineResult = xscalenet::run(&data, &config, |msg| eprintln!("{msg}"))?;
+// result.per_method[method][threshold] : Network
+// result.consensus[threshold]          : Consensus { network, ranked }
+```
+
+The CLI (`main.rs`) is a thin wrapper: it loads/discretizes the input, calls
+`run`, and formats the result via `output`. Tests and a future web frontend
+consume the same `PipelineResult`.
 
 ## Data model
 
-The pipeline is **column-major and index-based**, mirroring the R original:
+Two layers: a **typed public boundary** and an **index-based internal core**.
 
-- `Dataset { names, cols: Vec<Vec<u32>>, levels, nrow }` — each column is a vector
-  of integer level codes, ordered by sorted string value (matching R factor
-  ordering).
-- Variable pairs use a fixed **`combn` upper-triangle order**; a pair maps to a
-  linear index via a closed-form formula (`util::pair_index`).
-- `EdgeList` stores **parallel arrays over all `p(p−1)/2` pairs**
-  (`epresence`, `eorient`, `epresence_score`, `eorient_score`, `ecorr`).
-- Orientation is encoded as `2` (forward), `-2` (backward), `1` (unoriented),
-  with `NaN` meaning absent/NA.
-
-> This dense pair-space model is the main structural inheritance from R and the
-> source of the pipeline's O(p²) memory and time. See
-> [performance.md](performance.md) and the roadmap for the sparse replacement.
+- **Typed (public):** `Network { kind, edges: Vec<Edge> }`, where
+  `Edge { source, target, orientation: Orientation, presence_score: Option<f64>,
+  orient_score, ecorr }`. `Orientation` is an `enum` (`Forward` / `Backward` /
+  `Undirected`) and missing values are `Option<f64>` — the magic `2/-2/1` codes
+  and `NaN`-as-NA never leak past the boundary. `NetworkKind` records whether a
+  network is per-method or consensus (only affects the output orientation code).
+- **Internal (compute):** `Dataset { names, cols: Vec<Vec<u32>>, levels, nrow }`
+  (column-major level codes) and a **sparse** `EdgeList` — a
+  `HashMap<pair_index, EdgeRec>` holding only present edges. Pairs use `combn`
+  upper-triangle order with a closed-form `util::pair_index` and its O(1) inverse
+  `util::pair_at`. The typed `Network` is built from the `EdgeList` at the pipeline
+  boundary.
 
 ## Parallelism
 
