@@ -52,18 +52,50 @@ pub fn mi_mm(x: &[u32], y: &[u32], rx: u32, ry: u32) -> f64 {
 ///
 /// `cols[k]` is the level-coded column and `levels[k]` its cardinality. The
 /// returned matrix is symmetric, `>= 0`, with a zero diagonal.
+///
+/// Per-column marginal counts and entropies are precomputed once (each column
+/// appears in ~p pairs), so the O(n) per-pair loop only accumulates the joint
+/// histogram — one write per row instead of three — and no marginal is rebuilt.
+/// Results are identical to computing `mi_mm` per pair.
 pub fn build_mim(cols: &[&[u32]], levels: &[u32]) -> Vec<Vec<f64>> {
     let p = cols.len();
     let mut mim = vec![vec![0.0f64; p]; p];
+    if p == 0 {
+        return mim;
+    }
+    let nf = cols[0].len() as f64;
 
-    // Compute upper triangle in parallel, then mirror.
+    // Precompute per-column marginal counts and Miller-Madow entropies.
+    let hs: Vec<f64> = cols
+        .par_iter()
+        .zip(levels.par_iter())
+        .map(|(c, &lv)| {
+            let mut m = vec![0u32; lv as usize];
+            for &v in c.iter() {
+                m[v as usize] += 1;
+            }
+            entropy_mm(&m, nf)
+        })
+        .collect();
+
+    // Compute upper triangle in parallel, then mirror. Each worker reuses one
+    // joint-histogram buffer across the pairs it handles.
     let pairs: Vec<(usize, usize)> = (0..p)
         .flat_map(|i| (i + 1..p).map(move |j| (i, j)))
         .collect();
     let vals: Vec<f64> = pairs
         .par_iter()
-        .map(|&(i, j)| {
-            let v = mi_mm(cols[i], cols[j], levels[i], levels[j]);
+        .map_init(Vec::<u32>::new, |joint, &(i, j)| {
+            let ry = levels[j] as usize;
+            let sz = levels[i] as usize * ry;
+            joint.clear();
+            joint.resize(sz, 0);
+            let (xi, yj) = (cols[i], cols[j]);
+            for t in 0..xi.len() {
+                joint[xi[t] as usize * ry + yj[t] as usize] += 1;
+            }
+            let hxy = entropy_mm(joint, nf);
+            let v = hs[i] + hs[j] - hxy;
             if v < 0.0 {
                 0.0
             } else {
