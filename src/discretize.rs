@@ -1,11 +1,27 @@
 //! Optional PAM-based discretization of numeric columns, mirroring the R
 //! `discretize` (default `pamk`) with Tukey outlier handling and small-cluster
 //! merging. Non-numeric columns are passed through unchanged.
+//!
+//! Scaling: 1-D PAM is O(k²·n²) per SWAP iteration in the number of clustered
+//! points, so on columns with many non-missing values (n ~ 10⁴) the exact path
+//! does not finish. Columns whose clustered core exceeds `CLUSTER_CAP` are first
+//! reduced to `CLUSTER_CAP` weighted representatives (contiguous 1-D groups),
+//! then clustered with a weighted PAM — exact PAM is additive over points, so a
+//! representative carrying weight w is equivalent to w identical points. Columns
+//! at or below the cap take the exact unweighted path unchanged, so small inputs
+//! (e.g. the `pop2mat` fixtures) are bit-identical to before. Columns are
+//! discretized in parallel.
+
+use rayon::prelude::*;
+
+/// Above this core size a column is reduced to weighted representatives before
+/// clustering. At or below it, the exact unweighted PAM path runs unchanged.
+const CLUSTER_CAP: usize = 512;
 
 /// Discretize a column-major raw string matrix. Numeric columns are replaced by
 /// integer cluster labels (as strings, 1-based, ordered by medoid value).
 pub fn discretize_raw(raw: &[Vec<String>], max_clusters: usize) -> Vec<Vec<String>> {
-    raw.iter()
+    raw.par_iter()
         .map(|col| match parse_numeric(col) {
             Some(vals) => discretize_column(&vals, max_clusters),
             None => col.clone(),
@@ -95,7 +111,7 @@ fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<String> {
                 kmax = core_vals.len().saturating_sub(1);
             }
             let kmax = kmax.max(2);
-            let (cl, med) = pamk(&core_vals, 2, kmax);
+            let (cl, med) = pamk_capped(&core_vals, 2, kmax);
             (cl, med)
         }
     };
@@ -385,6 +401,231 @@ fn avg_silhouette(x: &[f64], assign: &[usize], k: usize) -> f64 {
         s_sum += s;
     }
     s_sum / n as f64
+}
+
+// ---- capped / weighted PAM (fast path for large columns) ----
+
+/// `pamk`, but for cores larger than `CLUSTER_CAP` first reduce to weighted
+/// representatives and cluster those with a weighted PAM. Exact PAM cost is
+/// additive over points, so a representative of weight `w` stands in for `w`
+/// identical points; on 1-D data the reduction only coarsens the medoid grid,
+/// not the ≤`max_clusters` partition. At or below the cap this is exactly `pamk`.
+fn pamk_capped(core_vals: &[f64], kmin: usize, kmax: usize) -> (Vec<usize>, Vec<f64>) {
+    if core_vals.len() <= CLUSTER_CAP {
+        return pamk(core_vals, kmin, kmax);
+    }
+    let (reps, weights, rep_of) = representatives(core_vals, CLUSTER_CAP);
+    let (rep_assign, medoids) = pamk_w(&reps, &weights, kmin, kmax);
+    let clustering: Vec<usize> = rep_of.iter().map(|&r| rep_assign[r]).collect();
+    (clustering, medoids)
+}
+
+/// Reduce 1-D values to at most `cap` weighted representatives. With at most
+/// `cap` distinct values they are used directly (exact); otherwise sorted values
+/// are split into `cap` contiguous equal-count groups, each represented by its
+/// median value with weight = group size. Returns (rep values, rep weights, and
+/// the representative index for each input value, in input order).
+fn representatives(vals: &[f64], cap: usize) -> (Vec<f64>, Vec<f64>, Vec<usize>) {
+    let n = vals.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| vals[a].partial_cmp(&vals[b]).unwrap());
+
+    let mut uniq = 1usize;
+    for w in 1..n {
+        if vals[order[w]] != vals[order[w - 1]] {
+            uniq += 1;
+        }
+    }
+
+    let mut rep_of = vec![0usize; n];
+    let mut reps: Vec<f64> = Vec::new();
+    let mut weights: Vec<f64> = Vec::new();
+
+    if uniq <= cap {
+        // One representative per distinct value.
+        let mut cur = vals[order[0]];
+        reps.push(cur);
+        weights.push(0.0);
+        for &i in &order {
+            if vals[i] != cur {
+                cur = vals[i];
+                reps.push(cur);
+                weights.push(0.0);
+            }
+            let r = reps.len() - 1;
+            rep_of[i] = r;
+            weights[r] += 1.0;
+        }
+    } else {
+        // `cap` contiguous groups of ~equal size.
+        for g in 0..cap {
+            let lo = g * n / cap;
+            let hi = ((g + 1) * n / cap).min(n);
+            if lo >= hi {
+                continue;
+            }
+            let mid = vals[order[lo + (hi - lo) / 2]];
+            let r = reps.len();
+            reps.push(mid);
+            weights.push((hi - lo) as f64);
+            for &i in &order[lo..hi] {
+                rep_of[i] = r;
+            }
+        }
+    }
+    (reps, weights, rep_of)
+}
+
+/// Weighted `pamk`: pick k in `[kmin, kmax]` with the best weighted average
+/// silhouette.
+fn pamk_w(x: &[f64], w: &[f64], kmin: usize, kmax: usize) -> (Vec<usize>, Vec<f64>) {
+    let mut best_asw = f64::MIN;
+    let mut best: (Vec<usize>, Vec<f64>) = (vec![1; x.len()], vec![weighted_mean(x, w)]);
+    for k in kmin..=kmax {
+        if k >= x.len() {
+            break;
+        }
+        let (assign, med_idx) = pam_w(x, w, k);
+        let asw = avg_silhouette_w(x, w, &assign, k);
+        if asw > best_asw {
+            best_asw = asw;
+            let mut present: Vec<usize> = assign.clone();
+            present.sort_unstable();
+            present.dedup();
+            let mut remap = vec![0usize; k];
+            for (new, &old) in present.iter().enumerate() {
+                remap[old] = new + 1;
+            }
+            let clustering: Vec<usize> = assign.iter().map(|&a| remap[a]).collect();
+            let medoids: Vec<f64> = present.iter().map(|&c| x[med_idx[c]]).collect();
+            best = (clustering, medoids);
+        }
+    }
+    best
+}
+
+/// Weighted PAM: BUILD then SWAP, with each point contributing its weight.
+fn pam_w(x: &[f64], w: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
+    let n = x.len();
+    let mut medoids: Vec<usize> = Vec::with_capacity(k);
+    let first = (0..n)
+        .min_by(|&a, &b| {
+            let sa: f64 = (0..n).map(|j| w[j] * dist(x[a], x[j])).sum();
+            let sb: f64 = (0..n).map(|j| w[j] * dist(x[b], x[j])).sum();
+            sa.partial_cmp(&sb).unwrap()
+        })
+        .unwrap();
+    medoids.push(first);
+    while medoids.len() < k {
+        let nd: Vec<f64> = (0..n)
+            .map(|i| medoids.iter().map(|&m| dist(x[i], x[m])).fold(f64::MAX, f64::min))
+            .collect();
+        let cand = (0..n)
+            .filter(|i| !medoids.contains(i))
+            .max_by(|&a, &b| {
+                let ga: f64 = (0..n).map(|i| w[i] * (nd[i] - dist(x[i], x[a])).max(0.0)).sum();
+                let gb: f64 = (0..n).map(|i| w[i] * (nd[i] - dist(x[i], x[b])).max(0.0)).sum();
+                ga.partial_cmp(&gb).unwrap()
+            })
+            .unwrap();
+        medoids.push(cand);
+    }
+    loop {
+        let mut best_delta = -1e-12;
+        let mut best_swap: Option<(usize, usize)> = None;
+        let cur_cost = total_cost_w(x, w, &medoids);
+        for mi in 0..medoids.len() {
+            for h in 0..n {
+                if medoids.contains(&h) {
+                    continue;
+                }
+                let mut trial = medoids.clone();
+                trial[mi] = h;
+                let delta = total_cost_w(x, w, &trial) - cur_cost;
+                if delta < best_delta {
+                    best_delta = delta;
+                    best_swap = Some((mi, h));
+                }
+            }
+        }
+        match best_swap {
+            Some((mi, h)) => medoids[mi] = h,
+            None => break,
+        }
+    }
+    let assign: Vec<usize> = (0..n)
+        .map(|i| {
+            medoids
+                .iter()
+                .enumerate()
+                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).partial_cmp(&dist(x[i], x[b])).unwrap())
+                .map(|(pos, _)| pos)
+                .unwrap()
+        })
+        .collect();
+    (assign, medoids)
+}
+
+fn total_cost_w(x: &[f64], w: &[f64], medoids: &[usize]) -> f64 {
+    (0..x.len())
+        .map(|i| w[i] * medoids.iter().map(|&m| dist(x[i], x[m])).fold(f64::MAX, f64::min))
+        .sum()
+}
+
+fn avg_silhouette_w(x: &[f64], w: &[f64], assign: &[usize], k: usize) -> f64 {
+    let n = x.len();
+    if k < 2 {
+        return -1.0;
+    }
+    let mut wc = vec![0.0f64; k];
+    for i in 0..n {
+        wc[assign[i]] += w[i];
+    }
+    let mut s_sum = 0.0;
+    let mut w_sum = 0.0;
+    for i in 0..n {
+        let ci = assign[i];
+        let mut same = 0.0;
+        let mut other = vec![0.0f64; k];
+        for j in 0..n {
+            if j == i {
+                continue;
+            }
+            let d = w[j] * dist(x[i], x[j]);
+            if assign[j] == ci {
+                same += d;
+            } else {
+                other[assign[j]] += d;
+            }
+        }
+        // Denominator excludes this point's own weight (its self-distance is 0).
+        let a_den = wc[ci] - w[i];
+        let a = if a_den > 0.0 { same / a_den } else { 0.0 };
+        let b = (0..k)
+            .filter(|&c| c != ci && wc[c] > 0.0)
+            .map(|c| other[c] / wc[c])
+            .fold(f64::MAX, f64::min);
+        let s = if a_den <= 0.0 || b == f64::MAX {
+            0.0
+        } else {
+            (b - a) / a.max(b)
+        };
+        s_sum += w[i] * s;
+        w_sum += w[i];
+    }
+    if w_sum > 0.0 {
+        s_sum / w_sum
+    } else {
+        -1.0
+    }
+}
+
+fn weighted_mean(x: &[f64], w: &[f64]) -> f64 {
+    let sw: f64 = w.iter().sum();
+    if sw == 0.0 {
+        return f64::NAN;
+    }
+    x.iter().zip(w).map(|(v, wi)| v * wi).sum::<f64>() / sw
 }
 
 // ---- small numeric helpers ----
