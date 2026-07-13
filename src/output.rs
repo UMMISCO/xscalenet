@@ -79,7 +79,7 @@ pub fn write_node_analysis(
     let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(
         f,
-        "node\tdegree\tstrength\tbetweenness\tcloseness\tclustering\tcommunity\tatc\tatc_last"
+        "node\tdegree\tstrength\tbetweenness\tcloseness\tclustering\tcommunity\tmodular_degree\tmodular_betweenness\tatc\tatc_last"
     )?;
     for (i, node) in nodes.iter().enumerate() {
         let n = &gm.nodes[i];
@@ -89,13 +89,15 @@ pub fn write_node_analysis(
         };
         writeln!(
             f,
-            "{node}\t{}\t{}\t{}\t{}\t{}\t{}\t{atc_s}\t{atc_last_s}",
+            "{node}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{atc_s}\t{atc_last_s}",
             n.degree,
             fmt(n.strength),
             fmt(n.betweenness),
             fmt(n.closeness),
             fmt(n.clustering),
             n.community,
+            n.modular_degree,
+            fmt(n.modular_betweenness),
         )?;
     }
     f.flush()?;

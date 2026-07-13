@@ -52,6 +52,10 @@ pub struct NodeMetrics {
     pub closeness: f64,
     pub clustering: f64,
     pub community: usize,
+    /// Degree within the node's own community (modular degree).
+    pub modular_degree: usize,
+    /// Betweenness within the node's community subgraph (normalized).
+    pub modular_betweenness: f64,
 }
 
 /// Graph-level summary plus per-node metrics.
@@ -84,6 +88,10 @@ pub fn compute(g: &Graph) -> GraphMetrics {
     let betweenness = betweenness(g);
     let closeness = closeness(g);
     let (community, modularity) = louvain(g);
+    let modular_degree: Vec<usize> = (0..n)
+        .map(|i| g.adj[i].iter().filter(|&&(u, _)| community[u] == community[i]).count())
+        .collect();
+    let modular_betweenness = modular_betweenness(g, &community);
     let n_communities = {
         let mut c = community.clone();
         c.sort_unstable();
@@ -99,6 +107,8 @@ pub fn compute(g: &Graph) -> GraphMetrics {
             closeness: closeness[i],
             clustering: clustering[i],
             community: community[i],
+            modular_degree: modular_degree[i],
+            modular_betweenness: modular_betweenness[i],
         })
         .collect();
 
@@ -261,6 +271,46 @@ fn brandes_source(g: &Graph, s: usize, delta_out: &mut [f64]) {
             delta_out[w] += delta[w];
         }
     }
+}
+
+/// Betweenness computed within each community's induced subgraph, normalized
+/// per community. Nodes bridging within their module score high; cross-module
+/// structure is ignored (that is the point — modular vs total centrality).
+fn modular_betweenness(g: &Graph, community: &[usize]) -> Vec<f64> {
+    let n = g.n;
+    let mut out = vec![0.0f64; n];
+    let ncomm = community.iter().copied().max().map(|c| c + 1).unwrap_or(0);
+    // Group nodes by community.
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); ncomm];
+    for (i, &c) in community.iter().enumerate() {
+        members[c].push(i);
+    }
+    for group in &members {
+        let k = group.len();
+        if k < 3 {
+            continue; // no interior shortest paths to bridge
+        }
+        // Induced subgraph on `group`, relabeled 0..k.
+        let local: std::collections::HashMap<usize, usize> =
+            group.iter().enumerate().map(|(l, &gid)| (gid, l)).collect();
+        let mut sub = Graph {
+            n: k,
+            adj: vec![Vec::new(); k],
+        };
+        for &gi in group {
+            let li = local[&gi];
+            for &(gj, w) in &g.adj[gi] {
+                if let Some(&lj) = local.get(&gj) {
+                    sub.adj[li].push((lj, w));
+                }
+            }
+        }
+        let bc = betweenness(&sub); // already normalized by (k-1)(k-2)
+        for (l, &gid) in group.iter().enumerate() {
+            out[gid] = bc[l];
+        }
+    }
+    out
 }
 
 /// Closeness centrality (unweighted, per connected component), normalized.
