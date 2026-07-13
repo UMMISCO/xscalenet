@@ -10,6 +10,10 @@ ARACNE and/or Bayesian hill-climbing local reconstructions → gather → consen
 with optional PAM discretization. It keeps everything in memory and reconstructs
 subgraphs in parallel, avoiding the R version's per-subgraph disk round-trips.
 
+📖 **Documentation:** see [`docs/`](docs/) — the
+[algorithm](docs/algorithm.md), [architecture](docs/architecture.md),
+[R mapping](docs/r-mapping.md), and [performance](docs/performance.md).
+
 ## Algorithm (and where it maps to the R code)
 
 | Stage | R source | Rust module |
