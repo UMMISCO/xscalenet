@@ -15,6 +15,25 @@ pub struct MethodInfo {
     pub weight_ecorr: bool,
 }
 
+impl MethodInfo {
+    /// Consensus metadata for a method: ARACNE is unoriented and ranked by
+    /// presence score; hill-climbing is oriented and ranked by `|ecorr|`.
+    pub fn for_method(method: Method) -> MethodInfo {
+        match method {
+            Method::Aracne => MethodInfo {
+                method,
+                ort: false,
+                weight_ecorr: false,
+            },
+            Method::BayesHc => MethodInfo {
+                method,
+                ort: true,
+                weight_ecorr: true,
+            },
+        }
+    }
+}
+
 /// A consensus edge in the ranked "rawAvg" output.
 pub struct RawEdge {
     pub idx: usize,

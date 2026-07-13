@@ -27,8 +27,8 @@ use std::process::exit;
 use xscalenet::data::Dataset;
 use xscalenet::discretize;
 use xscalenet::output;
-use xscalenet::scalenet::{self, Method, Params};
-use xscalenet::scs::{self, MethodInfo};
+use xscalenet::pipeline::RunConfig;
+use xscalenet::scalenet::{Method, Params};
 
 struct Args {
     input: String,
@@ -188,23 +188,6 @@ fn transpose_tsv(text: &str) -> Result<String, String> {
     Ok(out)
 }
 
-fn info_for(method: Method) -> MethodInfo {
-    match method {
-        // aracne: no orientation, ranked by presence score
-        Method::Aracne => MethodInfo {
-            method,
-            ort: false,
-            weight_ecorr: false,
-        },
-        // bayes_hc: oriented, ranked by correlation magnitude
-        Method::BayesHc => MethodInfo {
-            method,
-            ort: true,
-            weight_ecorr: true,
-        },
-    }
-}
-
 fn run() -> Result<(), String> {
     let args = parse_args()?;
 
@@ -229,29 +212,16 @@ fn run() -> Result<(), String> {
         data.nrow
     );
 
-    // Shared preprocessing (spectral embedding + subgraphs).
-    let prep = scalenet::prepare(&data, &args.params)?;
-    eprintln!(
-        "# Kept k={} eigenvectors, {} subgraphs, m={} vars/subgraph",
-        prep.spectral.k,
-        prep.subgraphs.len(),
-        prep.subset_m
-    );
+    // Reconstruct + fuse via the library pipeline; formatting is the CLI's job.
+    let config = RunConfig {
+        methods: args.methods.clone(),
+        params: args.params.clone(),
+    };
+    let result = xscalenet::pipeline::run(&data, &config, |msg| eprintln!("{msg}"))?;
 
-    // Precompute per-column ranks once (reused for every edge's ecorr).
-    let ranks = data.rank_matrix();
-
-    // Run each method, keeping per-threshold edge lists in memory.
-    // methods_lists[method_i][thresh_i]
-    let mut methods_lists = Vec::new();
-    for &method in &args.methods {
-        eprintln!("# Reconstructing with {}...", method.name());
-        let mut lists = scalenet::run_method(&data, &prep, method, &args.params);
-        for el in &mut lists {
-            scalenet::fill_ecorr(&data, &ranks, el);
-        }
-        // Write per-method global edge lists.
-        for (ti, thr) in args.params.pres_freq_thresh.iter().enumerate() {
+    // Per-method global edge lists.
+    for (mi, method) in result.methods.iter().enumerate() {
+        for (ti, thr) in result.thresholds.iter().enumerate() {
             let path: PathBuf = [
                 &args.outdir,
                 "globalGraph",
@@ -260,22 +230,13 @@ fn run() -> Result<(), String> {
             ]
             .iter()
             .collect();
-            output::write_edge_list(&path, &data, &lists[ti], args.edges_only)
+            output::write_edge_list(&path, &result.nodes, &result.per_method[mi][ti], args.edges_only)
                 .map_err(|e| format!("write {}: {e}", path.display()))?;
         }
-        methods_lists.push(lists);
     }
 
     // Consensus per threshold.
-    for (ti, thr) in args.params.pres_freq_thresh.iter().enumerate() {
-        let pairs: Vec<(MethodInfo, &scalenet::EdgeList)> = args
-            .methods
-            .iter()
-            .enumerate()
-            .map(|(mi, &m)| (info_for(m), &methods_lists[mi][ti]))
-            .collect();
-        let (cons, raw) = scs::consensus(&data, &pairs);
-
+    for (ti, thr) in result.thresholds.iter().enumerate() {
         let base: PathBuf = [
             &args.outdir,
             "consensusGraph",
@@ -283,13 +244,15 @@ fn run() -> Result<(), String> {
         ]
         .iter()
         .collect();
-        output::write_edge_list(&base.join("edgesList.txt"), &data, &cons, args.edges_only)
+        let cons = &result.consensus[ti];
+        output::write_edge_list(&base.join("edgesList.txt"), &result.nodes, &cons.network, args.edges_only)
             .map_err(|e| format!("write consensus: {e}"))?;
-        output::write_raw_consensus(&base.join("edgesList.consensus.rawAvg.txt"), &data, &raw)
-            .map_err(|e| format!("write consensus raw: {e}"))?;
-
-        let n_edges = cons.len();
-        eprintln!("# Consensus @ presFreq {thr}: {n_edges} edges");
+        output::write_raw_consensus(
+            &base.join("edgesList.consensus.rawAvg.txt"),
+            &result.nodes,
+            &cons.ranked,
+        )
+        .map_err(|e| format!("write consensus raw: {e}"))?;
     }
 
     eprintln!("# Done. Outputs under {}", args.outdir);

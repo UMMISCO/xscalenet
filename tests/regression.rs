@@ -84,6 +84,39 @@ fn aracne_matches_golden() {
 }
 
 #[test]
+fn run_api_returns_typed_networks() {
+    use xscalenet::network::{NetworkKind, Orientation};
+    use xscalenet::pipeline::{self, RunConfig};
+
+    let data = load_pop2mat();
+    let config = RunConfig {
+        methods: vec![Method::Aracne, Method::BayesHc],
+        params: params(),
+    };
+    let result = pipeline::run(&data, &config, |_| {}).unwrap();
+
+    assert_eq!(result.spectral.k, 13);
+    assert_eq!(result.per_method.len(), 2); // two methods
+    assert_eq!(result.consensus.len(), 2); // two thresholds
+    assert_eq!(result.nodes.len(), 45);
+
+    // ARACNE @0.3 present-edge count matches the golden, via the typed network.
+    assert_eq!(result.per_method[0][0].edges.len(), 205);
+
+    // ARACNE edges are undirected; consensus is a Consensus-kind network.
+    assert!(result.per_method[0][0]
+        .edges
+        .iter()
+        .all(|e| e.orientation == Orientation::Undirected));
+    assert_eq!(result.consensus[0].network.kind, NetworkKind::Consensus);
+
+    // Typed edges reference valid nodes with source < target.
+    for e in &result.consensus[0].network.edges {
+        assert!(e.source < e.target && e.target < result.nodes.len());
+    }
+}
+
+#[test]
 fn bayes_hc_is_deterministic() {
     let data = load_pop2mat();
     let prep = scalenet::prepare(&data, &params()).unwrap();

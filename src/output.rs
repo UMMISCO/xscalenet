@@ -1,43 +1,55 @@
-//! Writers for the scaleNet / consensus edge-list files (same layout as the R
-//! package so outputs can be compared directly).
+//! Writers for the scaleNet / consensus edge-list files (same byte layout as the
+//! R package). They format the typed [`Network`] / [`RankedEdge`] domain model.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::data::Dataset;
-use crate::scalenet::EdgeList;
-use crate::scs::RawEdge;
-use crate::util::fmt;
+use crate::network::{Network, RankedEdge};
+use crate::util::{fmt, pair_index};
+
+fn fmt_opt(x: Option<f64>) -> String {
+    match x {
+        Some(v) => fmt(v),
+        None => "NA".to_string(),
+    }
+}
 
 /// Write a scaleNet edge list. By default every node pair is emitted (present
-/// edges from the sparse map, absent pairs as NA / 0 on the fly — byte-identical
-/// to the dense layout). With `edges_only`, only present edges are written.
+/// edges from the network, absent pairs as NA / 0 on the fly — the full-pair R
+/// layout). With `edges_only`, only present edges are written.
 pub fn write_edge_list(
     path: &Path,
-    data: &Dataset,
-    el: &EdgeList,
+    nodes: &[String],
+    net: &Network,
     edges_only: bool,
 ) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
+    let p = nodes.len();
+    let by_idx: HashMap<usize, &_> = net
+        .edges
+        .iter()
+        .map(|e| (pair_index(e.source, e.target, p), e))
+        .collect();
+
     let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(f, "x\ty\tepresenceScore\tepresence\teorientScore\teorient\tecorr")?;
-    let p = data.ncol();
     let mut idx = 0usize;
     for a in 0..p {
-        let xa = &data.names[a];
+        let xa = &nodes[a];
         for b in (a + 1)..p {
-            let yb = &data.names[b];
-            match el.get(idx) {
-                Some(rec) => writeln!(
+            let yb = &nodes[b];
+            match by_idx.get(&idx) {
+                Some(e) => writeln!(
                     f,
                     "{xa}_<<_{yb}\t{xa}\t{yb}\t{}\t1\t{}\t{}\t{}",
-                    fmt(rec.epresence_score),
-                    fmt(rec.eorient_score),
-                    fmt(rec.eorient),
-                    fmt(rec.ecorr),
+                    fmt_opt(e.presence_score),
+                    fmt_opt(e.orient_score),
+                    fmt(e.orientation.code(net.kind)),
+                    fmt_opt(e.ecorr),
                 )?,
                 None if !edges_only => {
                     writeln!(f, "{xa}_<<_{yb}\t{xa}\t{yb}\tNA\t0\tNA\tNA\tNA")?
@@ -51,28 +63,26 @@ pub fn write_edge_list(
     Ok(())
 }
 
-/// Write the ranked consensus "rawAvg" output.
+/// Write the ranked consensus "rawAvg" output (best first).
 pub fn write_raw_consensus(
     path: &Path,
-    data: &Dataset,
-    raw: &[RawEdge],
+    nodes: &[String],
+    ranked: &[RankedEdge],
 ) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let p = data.ncol();
     let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(f, "x\ty\tavg.rank\tavg.ort\tecorr")?;
-    for e in raw {
-        let (a, b) = crate::util::pair_at(e.idx, p);
-        let xa = &data.names[a];
-        let yb = &data.names[b];
+    for e in ranked {
+        let xa = &nodes[e.source];
+        let yb = &nodes[e.target];
         writeln!(
             f,
             "{xa}_<<_{yb}\t{xa}\t{yb}\t{}\t{}\t{}",
             fmt(e.avg_rank),
             fmt(e.avg_ort),
-            fmt(e.ecorr),
+            fmt_opt(e.ecorr),
         )?;
     }
     f.flush()?;
