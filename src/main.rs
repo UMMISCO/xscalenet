@@ -341,7 +341,8 @@ fn run() -> Result<(), String> {
                     weighted: args.metrics_weighted,
                     ..Default::default()
                 };
-                atc::compute(&g, &t0, &cfg).atc
+                let r = atc::compute(&g, &t0, &cfg);
+                (r.atc, r.atc_last_config)
             });
             eprintln!(
                 "# Analysis @ presFreq {thr}: {} nodes, {} edges, {} communities, modularity {:.3}{}",
@@ -361,7 +362,8 @@ fn run() -> Result<(), String> {
             ]
             .iter()
             .collect();
-            output::write_node_analysis(&path, &result.nodes, &gm, atc.as_deref())
+            let atc_ref = atc.as_ref().map(|(a, al)| (a.as_slice(), al.as_slice()));
+            output::write_node_analysis(&path, &result.nodes, &gm, atc_ref)
                 .map_err(|e| format!("write node analysis: {e}"))?;
         }
     }

@@ -69,7 +69,7 @@ pub fn write_node_analysis(
     path: &Path,
     nodes: &[String],
     gm: &GraphMetrics,
-    atc: Option<&[f64]>,
+    atc: Option<(&[f64], &[f64])>,
 ) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -77,14 +77,17 @@ pub fn write_node_analysis(
     let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(
         f,
-        "node\tdegree\tstrength\tbetweenness\tcloseness\tclustering\tcommunity\tatc"
+        "node\tdegree\tstrength\tbetweenness\tcloseness\tclustering\tcommunity\tatc\tatc_last"
     )?;
     for (i, node) in nodes.iter().enumerate() {
         let n = &gm.nodes[i];
-        let atc_s = atc.map(|a| fmt(a[i])).unwrap_or_else(|| "NA".to_string());
+        let (atc_s, atc_last_s) = match atc {
+            Some((a, al)) => (fmt(a[i]), fmt(al[i])),
+            None => ("NA".to_string(), "NA".to_string()),
+        };
         writeln!(
             f,
-            "{node}\t{}\t{}\t{}\t{}\t{}\t{}\t{atc_s}",
+            "{node}\t{}\t{}\t{}\t{}\t{}\t{}\t{atc_s}\t{atc_last_s}",
             n.degree,
             fmt(n.strength),
             fmt(n.betweenness),

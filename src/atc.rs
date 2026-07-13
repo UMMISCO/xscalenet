@@ -28,14 +28,16 @@ use rayon::prelude::*;
 
 use crate::metrics::Graph;
 
-/// ATC parameters.
+/// ATC parameters (defaults mirror the R `dynamicPropagation`).
 #[derive(Clone, Copy, Debug)]
 pub struct AtcConfig {
     /// Use edge weights (`|ecorr|` etc., from [`Graph::from_network`]) or 1/0.
     pub weighted: bool,
+    /// Include a self-loop in the propagation (R uses `diag(J) <- 1`).
+    pub self_loop: bool,
     /// Maximum propagation steps.
     pub max_iter: usize,
-    /// Convergence threshold on co-inertia of consecutive configurations.
+    /// Convergence threshold on co-inertia (RV) of consecutive configurations.
     pub coinertia_threshold: f64,
 }
 
@@ -43,6 +45,7 @@ impl Default for AtcConfig {
     fn default() -> Self {
         AtcConfig {
             weighted: false,
+            self_loop: true,
             max_iter: 100,
             coinertia_threshold: 0.9,
         }
@@ -52,11 +55,15 @@ impl Default for AtcConfig {
 /// Result of an ATC run.
 #[derive(Clone, Debug)]
 pub struct AtcResult {
-    /// ATC score per node (higher = more influential on theme propagation).
+    /// ATC score per node: `Σ_p ‖Δrowᵢ‖·(1−coinertiaₚ)`, normalized to sum 1
+    /// (matches R `computeMTCDistCoinSum`).
     pub atc: Vec<f64>,
+    /// Alternative ATC = row sums of the converged configuration
+    /// (R `computeATC_last_config`, which the authors found often preferable).
+    pub atc_last_config: Vec<f64>,
     /// Number of propagation steps performed.
     pub n_iterations: usize,
-    /// Co-inertia of each consecutive pair of configurations.
+    /// Co-inertia (RV) of each consecutive pair of configurations.
     pub coinertia: Vec<f64>,
 }
 
@@ -83,19 +90,27 @@ pub fn compute(graph: &Graph, t0: &[Vec<f64>], cfg: &AtcConfig) -> AtcResult {
     assert_eq!(t0.len(), n, "t0 must have one row per node");
     let m = t0.first().map(|r| r.len()).unwrap_or(0);
 
+    // T⁰ is column-normalized before propagation (R normalizes each theme to 1).
     let mut prev: Vec<Vec<f64>> = t0.to_vec();
+    normalize_columns(&mut prev, m);
+
     let mut atc = vec![0.0f64; n];
     let mut coinertia = Vec::new();
     let mut iters = 0usize;
 
     for _ in 0..cfg.max_iter {
-        // Propagate: rowᵢ = Σ_{(u,w)∈adj[i]} w · prev[u]   (weighted per config).
-        let mut cur: Vec<Vec<f64>> = graph
-            .adj
-            .par_iter()
-            .map(|neigh| {
+        // Propagate: rowᵢ = w·prev[i] (self-loop) + Σ_{(u,w)∈adj[i]} w·prev[u].
+        let mut cur: Vec<Vec<f64>> = (0..n)
+            .into_par_iter()
+            .map(|i| {
                 let mut row = vec![0.0f64; m];
-                for &(u, w) in neigh {
+                if cfg.self_loop {
+                    let s = &prev[i];
+                    for j in 0..m {
+                        row[j] += s[j];
+                    }
+                }
+                for &(u, w) in &graph.adj[i] {
                     let wt = if cfg.weighted { w } else { 1.0 };
                     let src = &prev[u];
                     for j in 0..m {
@@ -127,8 +142,19 @@ pub fn compute(graph: &Graph, t0: &[Vec<f64>], cfg: &AtcConfig) -> AtcResult {
         }
     }
 
+    // Normalize the dist-coinertia ATC to sum 1 (R `computeMTCDistCoinSum`).
+    let s: f64 = atc.iter().sum();
+    if s > 0.0 {
+        for a in &mut atc {
+            *a /= s;
+        }
+    }
+    // Alternative ATC = row sums of the converged configuration.
+    let atc_last_config: Vec<f64> = prev.iter().map(|row| row.iter().sum()).collect();
+
     AtcResult {
         atc,
+        atc_last_config,
         n_iterations: iters,
         coinertia,
     }
@@ -146,8 +172,47 @@ fn normalize_columns(t: &mut [Vec<f64>], m: usize) {
     }
 }
 
-/// RV coefficient of two n×m matrices: `‖XᵀY‖²_F / (‖XᵀX‖_F · ‖YᵀY‖_F)`, in [0,1].
-fn rv_coefficient(x: &[Vec<f64>], y: &[Vec<f64>], m: usize) -> f64 {
+/// Column-standardize a config (center to mean 0, scale to unit population sd),
+/// matching `ade4::dudi.pca(scale = TRUE)`. Constant columns become 0.
+fn standardize(t: &[Vec<f64>], m: usize) -> Vec<Vec<f64>> {
+    let n = t.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let nf = n as f64;
+    let mut mean = vec![0.0f64; m];
+    for row in t {
+        for j in 0..m {
+            mean[j] += row[j];
+        }
+    }
+    for v in &mut mean {
+        *v /= nf;
+    }
+    let mut sd = vec![0.0f64; m];
+    for row in t {
+        for j in 0..m {
+            let d = row[j] - mean[j];
+            sd[j] += d * d;
+        }
+    }
+    for v in &mut sd {
+        *v = (*v / nf).sqrt();
+    }
+    t.iter()
+        .map(|row| {
+            (0..m)
+                .map(|j| if sd[j] > 0.0 { (row[j] - mean[j]) / sd[j] } else { 0.0 })
+                .collect()
+        })
+        .collect()
+}
+
+/// Co-inertia (RV coefficient) of two configurations, on column-standardized
+/// tables: `‖XᵀY‖²_F / (‖XᵀX‖_F · ‖YᵀY‖_F)`, in [0,1].
+fn rv_coefficient(x_raw: &[Vec<f64>], y_raw: &[Vec<f64>], m: usize) -> f64 {
+    let x = standardize(x_raw, m);
+    let y = standardize(y_raw, m);
     // Cross/inner product Gram matrices (m×m), computed as Σ_i outer products.
     let mut xy = vec![0.0f64; m * m];
     let mut xx = vec![0.0f64; m * m];
@@ -185,6 +250,84 @@ mod tests {
             adj[b].push((a, 1.0));
         }
         Graph { n, adj }
+    }
+
+    #[test]
+    fn matches_r_dynamic_propagation() {
+        // The exact 10-node graph J and membership m0 from the R integranet
+        // `Propagation_and_ATC_code.R`; atc_last_config must match the R output
+        // (co-inertia-independent, so an exact reference).
+        let g = from_edges(
+            10,
+            &[
+                (0, 1),
+                (0, 2),
+                (1, 2),
+                (1, 4),
+                (2, 4),
+                (2, 5),
+                (5, 6),
+                (5, 7),
+                (6, 7),
+                (7, 8),
+                (8, 9),
+            ],
+        );
+        // m0: brown, black, yellow
+        let m0: Vec<Vec<f64>> = vec![
+            vec![1., 0., 0.], // g1
+            vec![0., 0., 0.], // g2
+            vec![0., 1., 0.], // g3
+            vec![0., 0., 4.], // g4 (isolated)
+            vec![1., 1., 0.], // g5
+            vec![0., 0., 0.], // g6
+            vec![1., 0., 0.], // g7
+            vec![0., 0., 1.], // g8
+            vec![0., 0., 1.], // g9
+            vec![0., 0., 0.], // g10
+        ];
+        let cfg = AtcConfig {
+            weighted: false,
+            self_loop: true,
+            coinertia_threshold: 2.0, // never converge -> run all steps
+            max_iter: 49,             // R stores T0..T49 (49 propagations)
+        };
+        let res = compute(&g, &m0, &cfg);
+        let r_ref = [
+            0.4028144, 0.5090365, 0.6156974, 0.0, 0.4028144, 0.4044723, 0.2421126, 0.2715327,
+            0.1115623, 0.0399573,
+        ];
+        for i in 0..10 {
+            assert!(
+                (res.atc_last_config[i] - r_ref[i]).abs() < 1e-5,
+                "node {i}: rust {} vs R {}",
+                res.atc_last_config[i],
+                r_ref[i]
+            );
+        }
+
+        // Co-inertia (RV) vs ade4::coinertia on the same configs.
+        let r_coin = [0.513602, 0.918923, 0.972564, 0.989206, 0.991419];
+        for (p, &rc) in r_coin.iter().enumerate() {
+            assert!(
+                (res.coinertia[p] - rc).abs() < 1e-4,
+                "coinertia step {p}: rust {} vs R {rc}",
+                res.coinertia[p]
+            );
+        }
+        // Dist-coinertia ATC (normalized) vs R computeMTCDistCoinSum.
+        let r_atc = [
+            0.1127189, 0.1472663, 0.1467608, 0.1469249, 0.1479314, 0.0871726, 0.1080605,
+            0.0526891, 0.0095518, 0.0409239,
+        ];
+        for i in 0..10 {
+            assert!(
+                (res.atc[i] - r_atc[i]).abs() < 1e-4,
+                "atc node {i}: rust {} vs R {}",
+                res.atc[i],
+                r_atc[i]
+            );
+        }
     }
 
     #[test]
