@@ -29,6 +29,7 @@ use xscalenet::data::Dataset;
 use xscalenet::discretize;
 use xscalenet::enrichment;
 use xscalenet::metrics;
+use xscalenet::multilayer;
 use xscalenet::output;
 use xscalenet::pipeline::RunConfig;
 use xscalenet::scalenet::{Method, Params};
@@ -46,6 +47,7 @@ struct Args {
     metrics_weighted: bool,
     atc_file: Option<String>,
     atc_col: Option<String>,
+    theme_network: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -72,6 +74,7 @@ fn parse_args() -> Result<Args, String> {
     let mut metrics_weighted = false;
     let mut atc_file: Option<String> = None;
     let mut atc_col: Option<String> = None;
+    let mut theme_network = false;
     let mut params = Params {
         var_perc: 0.2,
         eigen_perc: None,
@@ -109,6 +112,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--atc" => atc_file = Some(value()?),
             "--atc-col" => atc_col = Some(value()?),
+            "--theme-network" => theme_network = true,
             "--methods" => {
                 methods = value()?
                     .split(',')
@@ -155,6 +159,7 @@ fn parse_args() -> Result<Args, String> {
         metrics_weighted,
         atc_file,
         atc_col,
+        theme_network,
     })
 }
 
@@ -394,6 +399,26 @@ fn run() -> Result<(), String> {
                 .collect();
                 output::write_enrichment(&epath, &per_module)
                     .map_err(|e| format!("write enrichment: {e}"))?;
+
+                // Multi-layer theme-proximity network.
+                if args.theme_network {
+                    let t0 = atc::membership_from_labels(labels, themes.len());
+                    let tcfg = multilayer::ThemeConfig {
+                        weighted: args.metrics_weighted,
+                        ..Default::default()
+                    };
+                    let tp = multilayer::theme_proximity(&g, &t0, themes, &tcfg);
+                    let tpath: PathBuf = [
+                        &args.outdir,
+                        "consensusGraph",
+                        &format!("globalNet_presFreq{thr}"),
+                        "themeNetwork.txt",
+                    ]
+                    .iter()
+                    .collect();
+                    output::write_theme_network(&tpath, &tp)
+                        .map_err(|e| format!("write theme network: {e}"))?;
+                }
             }
         }
     }

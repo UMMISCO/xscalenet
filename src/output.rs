@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::enrichment::EnrichmentTerm;
 use crate::metrics::GraphMetrics;
+use crate::multilayer::ThemeProximity;
 use crate::network::{Network, RankedEdge};
 use crate::util::{fmt, pair_index};
 
@@ -124,6 +125,38 @@ pub fn write_enrichment(
                 fmt(t.qvalue),
             )?;
         }
+    }
+    f.flush()?;
+    Ok(())
+}
+
+/// Write the theme-proximity (second-layer) network as an edge list over theme
+/// pairs (upper triangle), sorted by descending proximity.
+pub fn write_theme_network(path: &Path, tp: &ThemeProximity) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let m = tp.themes.len();
+    let mut rows: Vec<(usize, usize)> = Vec::new();
+    for a in 0..m {
+        for b in (a + 1)..m {
+            rows.push((a, b));
+        }
+    }
+    rows.sort_by(|&(a1, b1), &(a2, b2)| {
+        tp.proximity[a2][b2].total_cmp(&tp.proximity[a1][b1])
+    });
+    let mut f = BufWriter::new(fs::File::create(path)?);
+    writeln!(f, "theme1\ttheme2\tproximity\tdistance")?;
+    for (a, b) in rows {
+        writeln!(
+            f,
+            "{}\t{}\t{}\t{}",
+            tp.themes[a],
+            tp.themes[b],
+            fmt(tp.proximity[a][b]),
+            fmt(tp.distance[a][b]),
+        )?;
     }
     f.flush()?;
     Ok(())

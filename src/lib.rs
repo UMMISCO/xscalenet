@@ -14,6 +14,7 @@ pub mod enrichment;
 pub mod hc;
 pub mod metrics;
 pub mod mi;
+pub mod multilayer;
 pub mod network;
 pub mod output;
 pub mod pipeline;
