@@ -4,7 +4,19 @@ xscalenet is usable as a **library** and produces a **self-contained JSON graph*
 so a web frontend, notebook, or the IntegraNet app can consume its output without
 re-parsing edge-list files.
 
-## Library API
+## Python bindings
+
+In-process bindings expose `reconstruct(input, ...)` returning the JSON below;
+see [../bindings/python/README.md](../bindings/python/README.md). Built with
+pyo3/maturin (abi3, one wheel for Python 3.8+).
+
+```python
+import json, xscalenet
+g = json.loads(xscalenet.reconstruct("data.tsv", discretize=True, metrics=True,
+              annotation="taxonomy.tsv", atc_col="genus", theme_network=True))
+```
+
+## Library API (Rust)
 
 Two typed entry points, no I/O:
 
