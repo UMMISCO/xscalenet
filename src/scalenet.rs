@@ -10,7 +10,7 @@ use crate::data::Dataset;
 use crate::hc;
 use crate::recon::SubEdge;
 use crate::spectral::{self, Spectral};
-use crate::util::{self, npairs, pair_index};
+use crate::util::{npairs, pair_index};
 
 /// Reconstruction method selection.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -236,13 +236,28 @@ pub fn run_method(
         .collect()
 }
 
-/// Fill in the Spearman-based sign (`ecorr`) for every present edge.
-pub fn fill_ecorr(data: &Dataset, el: &mut EdgeList) {
+/// Fill in the Spearman-based sign (`ecorr`) for every present edge, using
+/// precomputed per-column ranks (see [`Dataset::rank_matrix`]). Only present
+/// edges are visited and their correlations are computed in parallel.
+pub fn fill_ecorr(data: &Dataset, ranks: &[Vec<f64>], el: &mut EdgeList) {
     let p = data.ncol();
-    let pairs = util::all_pairs(p);
-    for (idx, &(a, b)) in pairs.iter().enumerate() {
-        if el.epresence[idx] == 1 {
-            el.ecorr[idx] = data.spearman(a, b);
+    // Enumerate present edges (cheap O(p²) scan; ~#edges pushed).
+    let mut present: Vec<(usize, usize, usize)> = Vec::new();
+    let mut idx = 0usize;
+    for a in 0..p {
+        for b in (a + 1)..p {
+            if el.epresence[idx] == 1 {
+                present.push((idx, a, b));
+            }
+            idx += 1;
         }
+    }
+    // Pearson on precomputed ranks == Spearman on the codes; parallel over edges.
+    let vals: Vec<(usize, f64)> = present
+        .par_iter()
+        .map(|&(i, a, b)| (i, crate::data::corr(&ranks[a], &ranks[b])))
+        .collect();
+    for (i, v) in vals {
+        el.ecorr[i] = v;
     }
 }

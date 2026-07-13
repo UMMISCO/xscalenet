@@ -6,6 +6,7 @@
 //! (for mutual information / Bayesian scoring) and, since the codes double as
 //! the numeric representation R uses, they are reused for the Spearman sign.
 
+use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
 
@@ -101,6 +102,18 @@ impl Dataset {
         let y = rank_avg(&self.cols[b]);
         pearson(&x, &y)
     }
+
+    /// Precompute average ranks for every column (in parallel). Reused across all
+    /// edges so Spearman becomes an O(n) Pearson on ranks instead of re-ranking
+    /// both columns per pair. `spearman(a, b) == pearson(&ranks[a], &ranks[b])`.
+    pub fn rank_matrix(&self) -> Vec<Vec<f64>> {
+        self.cols.par_iter().map(|c| rank_avg(c)).collect()
+    }
+}
+
+/// Pearson correlation, exposed for use with precomputed rank vectors.
+pub(crate) fn corr(x: &[f64], y: &[f64]) -> f64 {
+    pearson(x, y)
 }
 
 /// Average ranks (ties get the mean of their positions), 1-based like R.

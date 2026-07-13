@@ -154,6 +154,9 @@ fn run() -> Result<(), String> {
         prep.subset_m
     );
 
+    // Precompute per-column ranks once (reused for every edge's ecorr).
+    let ranks = data.rank_matrix();
+
     // Run each method, keeping per-threshold edge lists in memory.
     // methods_lists[method_i][thresh_i]
     let mut methods_lists = Vec::new();
@@ -161,7 +164,7 @@ fn run() -> Result<(), String> {
         eprintln!("# Reconstructing with {}...", method.name());
         let mut lists = scalenet::run_method(&data, &prep, method, &args.params);
         for el in &mut lists {
-            scalenet::fill_ecorr(&data, el);
+            scalenet::fill_ecorr(&data, &ranks, el);
         }
         // Write per-method global edge lists.
         for (ti, thr) in args.params.pres_freq_thresh.iter().enumerate() {
