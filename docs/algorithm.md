@@ -173,9 +173,12 @@ Once a network is reconstructed, two analyses run on it (opt-in via `--metrics` 
   **Louvain communities** with modularity.
 - **Annotation Transcriptional Centrality (ATC)** — Prifti et al.,
   *Bioinformatics* 2010. Node annotations (e.g. taxonomy) are propagated over the
-  network as a non-linear dynamical system: from a binary node×theme membership
-  `T⁰`, iterate `Tᵖ = A·Tᵖ⁻¹` with per-theme column normalization until the
-  **co-inertia** of consecutive configurations converges; each node's ATC score
-  is `Σ_p ‖Δrowᵢ‖ · (1 − co-inertiaₚ)`, quantifying its influence on how
-  annotations flow through the network. This is the "functional layer" step of
-  the FunNet two-layer model (Prifti et al., *Bioinformatics* 2008).
+  network as a non-linear dynamical system: from a column-normalized node×theme
+  membership `T⁰`, iterate `Tᵖ = A·Tᵖ⁻¹` (with a self-loop, per-theme column
+  normalization) until the **co-inertia** (RV of column-standardized configs) of
+  consecutive configurations converges. Two scores are reported: the
+  dist-coinertia sum `Σ_p ‖Δrowᵢ‖·(1−co-inertiaₚ)` (normalized), and
+  `atc_last = rowSums(final config)`. This is the "functional layer" of the FunNet
+  two-layer model (Prifti et al., *Bioinformatics* 2008). The implementation is
+  **numerically validated against the R `integranet::dynamicPropagation`**:
+  propagation to <1e-5, co-inertia (vs `ade4::coinertia`) and ATC to <1e-4.
