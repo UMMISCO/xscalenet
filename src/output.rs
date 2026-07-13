@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use crate::enrichment::EnrichmentTerm;
 use crate::metrics::GraphMetrics;
 use crate::network::{Network, RankedEdge};
 use crate::util::{fmt, pair_index};
@@ -95,6 +96,34 @@ pub fn write_node_analysis(
             fmt(n.clustering),
             n.community,
         )?;
+    }
+    f.flush()?;
+    Ok(())
+}
+
+/// Write per-module annotation enrichment (one block per community).
+pub fn write_enrichment(
+    path: &Path,
+    per_module: &[(usize, Vec<EnrichmentTerm>)],
+) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = BufWriter::new(fs::File::create(path)?);
+    writeln!(f, "community\tterm\tinterest\treference\tpvalue\todds\tqvalue")?;
+    for (c, terms) in per_module {
+        for t in terms {
+            writeln!(
+                f,
+                "{c}\t{}\t{}\t{}\t{}\t{}\t{}",
+                t.term,
+                t.interest_count,
+                t.reference_count,
+                fmt(t.pvalue),
+                fmt(t.odds),
+                fmt(t.qvalue),
+            )?;
+        }
     }
     f.flush()?;
     Ok(())

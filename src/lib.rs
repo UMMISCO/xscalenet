@@ -10,6 +10,7 @@ pub mod aracne;
 pub mod atc;
 pub mod data;
 pub mod discretize;
+pub mod enrichment;
 pub mod hc;
 pub mod metrics;
 pub mod mi;

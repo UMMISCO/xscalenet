@@ -27,6 +27,7 @@ use std::process::exit;
 use xscalenet::atc;
 use xscalenet::data::Dataset;
 use xscalenet::discretize;
+use xscalenet::enrichment;
 use xscalenet::metrics;
 use xscalenet::output;
 use xscalenet::pipeline::RunConfig;
@@ -365,6 +366,35 @@ fn run() -> Result<(), String> {
             let atc_ref = atc.as_ref().map(|(a, al)| (a.as_slice(), al.as_slice()));
             output::write_node_analysis(&path, &result.nodes, &gm, atc_ref)
                 .map_err(|e| format!("write node analysis: {e}"))?;
+
+            // Per-module annotation enrichment (Fisher) when an annotation is given.
+            if let Some((labels, themes)) = atc_labels.as_ref() {
+                let ref_terms: Vec<String> =
+                    labels.iter().filter_map(|l| l.map(|t| themes[t].clone())).collect();
+                let mut by_comm: std::collections::BTreeMap<usize, Vec<String>> =
+                    std::collections::BTreeMap::new();
+                for (i, nm) in gm.nodes.iter().enumerate() {
+                    if let Some(t) = labels[i] {
+                        by_comm.entry(nm.community).or_default().push(themes[t].clone());
+                    }
+                }
+                let per_module: Vec<(usize, Vec<enrichment::EnrichmentTerm>)> = by_comm
+                    .into_iter()
+                    .map(|(c, interest)| {
+                        (c, enrichment::enrichment_analysis(&interest, &ref_terms))
+                    })
+                    .collect();
+                let epath: PathBuf = [
+                    &args.outdir,
+                    "consensusGraph",
+                    &format!("globalNet_presFreq{thr}"),
+                    "enrichment.txt",
+                ]
+                .iter()
+                .collect();
+                output::write_enrichment(&epath, &per_module)
+                    .map_err(|e| format!("write enrichment: {e}"))?;
+            }
         }
     }
 
