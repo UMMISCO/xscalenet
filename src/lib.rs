@@ -13,6 +13,7 @@ pub mod data;
 pub mod discretize;
 pub mod enrichment;
 pub mod hc;
+pub mod io;
 pub mod metrics;
 pub mod mi;
 pub mod multilayer;
