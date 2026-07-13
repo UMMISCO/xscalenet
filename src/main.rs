@@ -24,8 +24,10 @@
 use std::path::PathBuf;
 use std::process::exit;
 
+use xscalenet::atc;
 use xscalenet::data::Dataset;
 use xscalenet::discretize;
+use xscalenet::metrics;
 use xscalenet::output;
 use xscalenet::pipeline::RunConfig;
 use xscalenet::scalenet::{Method, Params};
@@ -39,6 +41,10 @@ struct Args {
     transpose: bool,
     edges_only: bool,
     max_clusters: usize,
+    metrics: bool,
+    metrics_weighted: bool,
+    atc_file: Option<String>,
+    atc_col: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -61,6 +67,10 @@ fn parse_args() -> Result<Args, String> {
     let mut transpose = false;
     let mut edges_only = false;
     let mut max_clusters = 5usize;
+    let mut metrics = false;
+    let mut metrics_weighted = false;
+    let mut atc_file: Option<String> = None;
+    let mut atc_col: Option<String> = None;
     let mut params = Params {
         var_perc: 0.2,
         eigen_perc: None,
@@ -91,6 +101,13 @@ fn parse_args() -> Result<Args, String> {
             "--maxp" => params.maxp = value()?.parse().map_err(|e| format!("{e}"))?,
             "--max-iter" => params.max_iter = value()?.parse().map_err(|e| format!("{e}"))?,
             "--iss" => params.iss = value()?.parse().map_err(|e| format!("{e}"))?,
+            "--metrics" => metrics = true,
+            "--metrics-weighted" => {
+                metrics = true;
+                metrics_weighted = true;
+            }
+            "--atc" => atc_file = Some(value()?),
+            "--atc-col" => atc_col = Some(value()?),
             "--methods" => {
                 methods = value()?
                     .split(',')
@@ -133,7 +150,55 @@ fn parse_args() -> Result<Args, String> {
         transpose,
         edges_only,
         max_clusters,
+        metrics,
+        metrics_weighted,
+        atc_file,
+        atc_col,
     })
+}
+
+/// Read a node-annotation TSV (header, node id in column 1) and map each network
+/// node to a categorical theme index for a chosen column (default: column 2).
+/// Returns per-node `Some(theme)`/`None` plus the distinct theme names.
+fn read_annotation_labels(
+    path: &str,
+    node_names: &[String],
+    col: Option<&str>,
+) -> Result<(Vec<Option<usize>>, Vec<String>), String> {
+    let text = read_input(path)?;
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header: Vec<&str> = lines
+        .next()
+        .ok_or("empty annotation file")?
+        .split('\t')
+        .map(str::trim)
+        .collect();
+    let col_idx = match col {
+        Some(name) => header
+            .iter()
+            .position(|h| *h == name)
+            .ok_or_else(|| format!("annotation column '{name}' not found"))?,
+        None => 1.min(header.len().saturating_sub(1)),
+    };
+    // node name -> raw annotation value
+    let mut value_of: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for line in lines {
+        let f: Vec<&str> = line.split('\t').map(str::trim).collect();
+        if f.len() > col_idx {
+            value_of.insert(f[0].to_string(), f[col_idx].to_string());
+        }
+    }
+    // distinct values -> theme indices (sorted for determinism)
+    let mut themes: Vec<String> = value_of.values().cloned().collect();
+    themes.sort();
+    themes.dedup();
+    let theme_idx: std::collections::HashMap<&String, usize> =
+        themes.iter().enumerate().map(|(i, t)| (t, i)).collect();
+    let labels = node_names
+        .iter()
+        .map(|n| value_of.get(n).and_then(|v| theme_idx.get(v).copied()))
+        .collect();
+    Ok((labels, themes))
 }
 
 /// Read a TSV, transparently decompressing gzip (`.gz` extension or gzip magic).
@@ -253,6 +318,52 @@ fn run() -> Result<(), String> {
             &cons.ranked,
         )
         .map_err(|e| format!("write consensus raw: {e}"))?;
+    }
+
+    // Optional per-node analysis (topological metrics and/or ATC) on each
+    // consensus network.
+    if args.metrics || args.atc_file.is_some() {
+        let atc_labels = match &args.atc_file {
+            Some(path) => Some(read_annotation_labels(
+                path,
+                &result.nodes,
+                args.atc_col.as_deref(),
+            )?),
+            None => None,
+        };
+        for (ti, thr) in result.thresholds.iter().enumerate() {
+            let net = &result.consensus[ti].network;
+            let g = metrics::Graph::from_network(net, result.nodes.len(), args.metrics_weighted);
+            let gm = metrics::compute(&g);
+            let atc = atc_labels.as_ref().map(|(labels, themes)| {
+                let t0 = atc::membership_from_labels(labels, themes.len());
+                let cfg = atc::AtcConfig {
+                    weighted: args.metrics_weighted,
+                    ..Default::default()
+                };
+                atc::compute(&g, &t0, &cfg).atc
+            });
+            eprintln!(
+                "# Analysis @ presFreq {thr}: {} nodes, {} edges, {} communities, modularity {:.3}{}",
+                gm.n_nodes,
+                gm.n_edges,
+                gm.n_communities,
+                gm.modularity,
+                atc.as_ref()
+                    .map(|_| format!(", ATC over {} themes", atc_labels.as_ref().unwrap().1.len()))
+                    .unwrap_or_default(),
+            );
+            let path: PathBuf = [
+                &args.outdir,
+                "consensusGraph",
+                &format!("globalNet_presFreq{thr}"),
+                "nodeAnalysis.txt",
+            ]
+            .iter()
+            .collect();
+            output::write_node_analysis(&path, &result.nodes, &gm, atc.as_deref())
+                .map_err(|e| format!("write node analysis: {e}"))?;
+        }
     }
 
     eprintln!("# Done. Outputs under {}", args.outdir);

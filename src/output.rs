@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use crate::metrics::GraphMetrics;
 use crate::network::{Network, RankedEdge};
 use crate::util::{fmt, pair_index};
 
@@ -58,6 +59,39 @@ pub fn write_edge_list(
             }
             idx += 1;
         }
+    }
+    f.flush()?;
+    Ok(())
+}
+
+/// Write a per-node analysis table: topological metrics and, if provided, ATC.
+pub fn write_node_analysis(
+    path: &Path,
+    nodes: &[String],
+    gm: &GraphMetrics,
+    atc: Option<&[f64]>,
+) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = BufWriter::new(fs::File::create(path)?);
+    writeln!(
+        f,
+        "node\tdegree\tstrength\tbetweenness\tcloseness\tclustering\tcommunity\tatc"
+    )?;
+    for (i, node) in nodes.iter().enumerate() {
+        let n = &gm.nodes[i];
+        let atc_s = atc.map(|a| fmt(a[i])).unwrap_or_else(|| "NA".to_string());
+        writeln!(
+            f,
+            "{node}\t{}\t{}\t{}\t{}\t{}\t{}\t{atc_s}",
+            n.degree,
+            fmt(n.strength),
+            fmt(n.betweenness),
+            fmt(n.closeness),
+            fmt(n.clustering),
+            n.community,
+        )?;
     }
     f.flush()?;
     Ok(())
