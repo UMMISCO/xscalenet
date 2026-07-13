@@ -7,6 +7,7 @@
 //! result; see [`output`] for the R-compatible writers.
 
 pub mod aracne;
+pub mod atc;
 pub mod data;
 pub mod discretize;
 pub mod hc;
