@@ -67,16 +67,26 @@ effectively unusable to **25 s**:
 | **Buffered edge-list writers** (`BufWriter`) — was one `write()` syscall per row | removed the I/O stall; **>266 s → 152 s** |
 | **ecorr precompute + parallel** — rank each column once, then O(n) Pearson on ranks over present edges | **152 s → 53 s**, output bit-identical |
 | **ARACNE reuses the global MI matrix** — slice instead of rebuild per subgraph | reconstruct block **36 s → 8.5 s**; **53 s → 25 s**, bit-identical |
+| **Sparse `EdgeList`** — present edges only (was dense O(p²) arrays) | peak RSS **~2.2 GB → ~1.9 GB**, bit-identical; foundation for present-only output |
 
 After these, the **MI + Laplacian + eigendecomposition stage (~14.5 s)** is the
-dominant one (O(p³) eigen + O(p²·n) MI).
+dominant *time* cost (O(p³) eigen + O(p²·n) MI).
+
+### Memory profile (p=2417)
+
+Peak RSS ~1.9 GB is **not** in the edge lists. It is:
+1. **~1.5 GB during input parsing** — all p·n ≈ 24 M cells are held as `String`s.
+2. **~190 MB** for the precomputed rank matrix (p×n f64), plus reconstruct transients.
 
 ## Remaining optimization direction
 
-1. **Iterative eigensolver** for the `k` smallest eigenpairs (removes the O(p³)
+1. **Compact input parsing** — parse per column into typed values (numeric →
+   `f64`, else interned categoricals) instead of 24 M `String`s (~8× less memory).
+   This is the current #1 memory target.
+2. **Iterative eigensolver** for the `k` smallest eigenpairs (removes the O(p³)
    eigen). Note: the auto-`k` elbow heuristic needs the full spectrum, so this
    requires either a fixed `k` or a separate cheap spectrum estimate.
-2. **Sparse edge model + present-only output** — removes the O(p²) memory
-   (1.75 GB at p=2417) and shrinks output ~6×; the memory blocker for genome-wide p.
-3. Exploit the ~87% sparsity in the MI pass; parallelize the remaining serial tails.
-4. Bound hill-climbing with a max-parents cap.
+3. **Present-only output** (optional) — now trivial on the sparse `EdgeList`; cuts
+   output file size ~6×.
+4. Exploit the ~87% sparsity in the MI pass; parallelize the remaining serial tails;
+   bound hill-climbing with a max-parents cap; fix bayes_hc run-to-run nondeterminism.
