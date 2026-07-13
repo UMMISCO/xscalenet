@@ -6,7 +6,7 @@
 //! per-node local scores are cached. Orientation of each learned arc is mapped
 //! back onto the ordered global pair.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::recon::SubEdge;
 
@@ -59,8 +59,11 @@ impl<'a> Scorer<'a> {
         let lg_alpha_ijk = libm::lgamma(alpha_ijk);
 
         // Count N_ijk indexed by (parent config, child level). Only configs
-        // that actually occur contribute a non-zero term.
-        let mut counts: HashMap<usize, Vec<u32>> = HashMap::new();
+        // that actually occur contribute a non-zero term. A BTreeMap keeps the
+        // configs in key order so the score sum below is summed in a fixed order
+        // — floating-point addition is not associative, and a nondeterministic
+        // (HashMap) order made close hill-climbing moves differ run to run.
+        let mut counts: BTreeMap<usize, Vec<u32>> = BTreeMap::new();
         let child_col = self.cols[child];
         for row in 0..self.nrow {
             let mut cfg = 0usize;
