@@ -1,3 +1,4 @@
 scalenet/
 target/
 .private/
+out/
