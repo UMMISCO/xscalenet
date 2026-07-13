@@ -68,9 +68,11 @@ effectively unusable to **25 s**:
 | **ecorr precompute + parallel** — rank each column once, then O(n) Pearson on ranks over present edges | **152 s → 53 s**, output bit-identical |
 | **ARACNE reuses the global MI matrix** — slice instead of rebuild per subgraph | reconstruct block **36 s → 8.5 s**; **53 s → 25 s**, bit-identical |
 | **Sparse `EdgeList`** — present edges only (was dense O(p²) arrays) | peak RSS **~2.2 GB → ~1.9 GB**, bit-identical; foundation for present-only output |
+| **Zero-copy parse + discretize-to-codes** — `&str` slices, no label strings, text freed early | peak RSS **~1.9 GB → ~1.4 GB**, bit-identical both paths |
+| **MI marginal precompute** — per-column marginals/entropies once; one write/row in the joint loop | MI+eigen **~14.5 s → ~12.7 s**, MI values identical |
 
-After these, the **MI + Laplacian + eigendecomposition stage (~14.5 s)** is the
-dominant *time* cost (O(p³) eigen + O(p²·n) MI).
+After these, the **single-threaded O(p³) eigendecomposition (~10 s)** is the
+dominant time cost, and PAM discretization (~6–8 s) is next.
 
 ### Memory profile (p=2417)
 
@@ -80,13 +82,19 @@ Peak RSS ~1.9 GB is **not** in the edge lists. It is:
 
 ## Remaining optimization direction
 
-1. **Compact input parsing** — parse per column into typed values (numeric →
-   `f64`, else interned categoricals) instead of 24 M `String`s (~8× less memory).
-   This is the current #1 memory target.
-2. **Iterative eigensolver** for the `k` smallest eigenpairs (removes the O(p³)
-   eigen). Note: the auto-`k` elbow heuristic needs the full spectrum, so this
-   requires either a fixed `k` or a separate cheap spectrum estimate.
-3. **Present-only output** (optional) — now trivial on the sparse `EdgeList`; cuts
-   output file size ~6×.
-4. Exploit the ~87% sparsity in the MI pass; parallelize the remaining serial tails;
-   bound hill-climbing with a max-parents cap; fix bayes_hc run-to-run nondeterminism.
+The safe, bit-identical wins are largely done. What is left trades accuracy or
+carries implementation risk — a deliberate choice:
+
+1. **Eigendecomposition (O(p³), ~10 s, single-threaded)** — an iterative/partial
+   solver (Lanczos, or eigenvalues + inverse iteration for the `k` smallest
+   vectors) would remove most of it, but (a) the auto-`k` elbow needs the full
+   spectrum and (b) a different solver yields different (still valid) eigenvectors,
+   so subgraphs — hence the network — may change. Not bit-identical.
+2. **PAM discretization (~6–8 s)** — lowering `CLUSTER_CAP` is a speed/fidelity
+   knob (512→256 is ~4× faster but changes ~6 % of edges; small inputs like
+   pop2mat are unaffected either way). The principled fix is exact 1-D k-means DP
+   (Ckmeans.1d.dp) — faster *and* more accurate, but again changes results. A
+   FastPAM SWAP would be identical but is fiddly to get bit-exact.
+3. **Present-only output** (optional flag) — trivial on the sparse `EdgeList`.
+4. Parallelize the remaining serial tails; `maxp` cap for hill-climbing; fix
+   bayes_hc run-to-run nondeterminism (correctness).
