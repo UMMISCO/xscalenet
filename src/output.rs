@@ -2,7 +2,7 @@
 //! package so outputs can be compared directly).
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use crate::data::Dataset;
@@ -15,7 +15,7 @@ pub fn write_edge_list(path: &Path, data: &Dataset, el: &EdgeList) -> std::io::R
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let mut f = fs::File::create(path)?;
+    let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(f, "x\ty\tepresenceScore\tepresence\teorientScore\teorient\tecorr")?;
     for (idx, (a, b)) in all_pairs(data.ncol()).into_iter().enumerate() {
         let xa = &data.names[a];
@@ -30,6 +30,7 @@ pub fn write_edge_list(path: &Path, data: &Dataset, el: &EdgeList) -> std::io::R
             fmt(el.ecorr[idx]),
         )?;
     }
+    f.flush()?;
     Ok(())
 }
 
@@ -43,7 +44,7 @@ pub fn write_raw_consensus(
         fs::create_dir_all(dir)?;
     }
     let pairs = all_pairs(data.ncol());
-    let mut f = fs::File::create(path)?;
+    let mut f = BufWriter::new(fs::File::create(path)?);
     writeln!(f, "x\ty\tavg.rank\tavg.ort\tecorr")?;
     for e in raw {
         let (a, b) = pairs[e.idx];
@@ -57,5 +58,6 @@ pub fn write_raw_consensus(
             fmt(e.ecorr),
         )?;
     }
+    f.flush()?;
     Ok(())
 }
