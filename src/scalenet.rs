@@ -119,9 +119,7 @@ pub fn prepare(data: &Dataset, params: &Params) -> Result<Prep, String> {
         // (surviving-row-index, value)
         let mut order: Vec<usize> = (0..q).collect();
         order.sort_by(|&i, &j| {
-            sp.eigenvectors[j][c]
-                .partial_cmp(&sp.eigenvectors[i][c])
-                .unwrap()
+            sp.eigenvectors[j][c].total_cmp(&sp.eigenvectors[i][c])
         }); // descending by value
 
         let top: Vec<usize> = order[..m]
@@ -213,7 +211,7 @@ pub fn run_method(
     let mut avg_score: HashMap<usize, f64> = HashMap::with_capacity(scores.len());
     for (idx, vals) in scores {
         let mut uniq = vals;
-        uniq.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        uniq.sort_by(|x, y| x.total_cmp(y));
         uniq.dedup();
         avg_score.insert(idx, uniq.iter().sum::<f64>() / uniq.len() as f64);
     }

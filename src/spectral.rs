@@ -83,7 +83,7 @@ pub fn compute(
 
     // Sort ascending by eigenvalue.
     let mut order: Vec<usize> = (0..q).collect();
-    order.sort_by(|&i, &j| vals[i].partial_cmp(&vals[j]).unwrap());
+    order.sort_by(|&i, &j| vals[i].total_cmp(&vals[j]));
     let eigenvalues: Vec<f64> = order.iter().map(|&i| vals[i]).collect();
 
     // Determine k.
@@ -191,7 +191,16 @@ fn best_k_perc(eigenvalues: &[f64]) -> f64 {
     let (int1, slope1, _) = lm(&xs[n1_start - 1..n1_end], &eigenvalues[n1_start - 1..n1_end]);
     let (int2, slope2, _) = lm(&xs[0..n1_start], &eigenvalues[0..n1_start]);
 
-    let best_k = (int2 - int1) / (slope1 - slope2);
+    // Two near-parallel fitted lines give no usable intersection; fall back to a
+    // small default rather than a division by (nearly) zero.
+    let denom = slope1 - slope2;
+    if denom.abs() < 1e-12 {
+        return round4((2.0 / p as f64).max(0.0));
+    }
+    let best_k = (int2 - int1) / denom;
+    if !best_k.is_finite() || best_k <= 0.0 {
+        return round4((2.0 / p as f64).max(0.0));
+    }
     round4(best_k / p as f64)
 }
 

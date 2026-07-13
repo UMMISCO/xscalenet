@@ -57,7 +57,7 @@ pub fn consensus(
                 (true, true) => a.cmp(&b),
                 (true, false) => std::cmp::Ordering::Greater,
                 (false, true) => std::cmp::Ordering::Less,
-                (false, false) => wb.partial_cmp(&wa).unwrap().then(a.cmp(&b)),
+                (false, false) => wb.total_cmp(&wa).then(a.cmp(&b)),
             }
         });
         let mut rank = HashMap::with_capacity(inferred.len());
@@ -157,11 +157,7 @@ pub fn consensus(
     }
 
     // Ranked raw output: ascending consensus score (best first).
-    raw.sort_by(|a, b| {
-        a.avg_rank
-            .partial_cmp(&b.avg_rank)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    raw.sort_by(|a, b| a.avg_rank.total_cmp(&b.avg_rank));
 
     (out, raw)
 }

@@ -45,8 +45,19 @@ impl Dataset {
     /// input, nrow) without encoding. The slices are zero-copy borrows of `text`,
     /// so parsing a large matrix does not allocate per cell.
     pub fn parse_tsv_raw(text: &str) -> Result<(Vec<String>, Vec<Vec<&str>>, usize), String> {
-        let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-        let header = lines.next().ok_or("empty input")?;
+        let mut lines = text.lines();
+        // Header = first non-blank line (skip only leading blank lines). Data
+        // rows are NOT filtered: an empty field is a valid NA cell, so blank rows
+        // are kept — for a single-column file a blank line is one NA cell; for a
+        // multi-column file the field-count check flags it as malformed instead of
+        // silently dropping the row.
+        let header = loop {
+            match lines.next() {
+                None => return Err("empty input".into()),
+                Some(l) if l.trim().is_empty() => continue,
+                Some(l) => break l,
+            }
+        };
         let names: Vec<String> = header.split('\t').map(|s| s.trim().to_string()).collect();
         let ncol = names.len();
 
@@ -134,11 +145,11 @@ pub(crate) fn encode_col_numeric_aware(col: &[&str]) -> (Vec<u32>, u32) {
     match nums {
         Some(vals) => {
             let mut uniq = vals.clone();
-            uniq.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            uniq.sort_by(|a, b| a.total_cmp(b));
             uniq.dedup();
             let coded: Vec<u32> = vals
                 .iter()
-                .map(|v| uniq.binary_search_by(|u| u.partial_cmp(v).unwrap()).unwrap() as u32)
+                .map(|v| uniq.binary_search_by(|u| u.total_cmp(v)).unwrap() as u32)
                 .collect();
             (coded, uniq.len() as u32)
         }

@@ -111,7 +111,7 @@ fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<u8> {
     // Too few non-NA, or constant column -> single class.
     let uniq_vals: Vec<f64> = {
         let mut u: Vec<f64> = not_na.iter().map(|&i| values[i]).collect();
-        u.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        u.sort_by(|a, b| a.total_cmp(b));
         u.dedup();
         u
     };
@@ -147,7 +147,7 @@ fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<u8> {
     let (mut clustering, mut medoids): (Vec<usize>, Vec<f64>) = {
         let core_uniq: Vec<f64> = {
             let mut u = core_vals.clone();
-            u.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            u.sort_by(|a, b| a.total_cmp(b));
             u.dedup();
             u
         };
@@ -209,7 +209,7 @@ fn discretize_column(values: &[f64], max_clusters: usize) -> Vec<u8> {
 
     // Order cluster labels by medoid value (ascending) -> final 1-based labels.
     let mut order: Vec<usize> = (0..medoids.len()).collect();
-    order.sort_by(|&a, &b| medoids[a].partial_cmp(&medoids[b]).unwrap());
+    order.sort_by(|&a, &b| medoids[a].total_cmp(&medoids[b]));
     let mut remap = vec![0usize; medoids.len() + 1];
     for (new, &old) in order.iter().enumerate() {
         remap[old + 1] = new + 1; // old cluster label (1-based) -> new
@@ -258,7 +258,7 @@ fn merge_small(cl: &mut [usize], medoids: &mut Vec<f64>, core_medoid_count: usiz
                 pairs.push((a, b, d));
             }
         }
-        pairs.sort_by(|x, y| x.2.partial_cmp(&y.2).unwrap());
+        pairs.sort_by(|x, y| x.2.total_cmp(&y.2));
         let merge = pairs
             .iter()
             .find(|(a, b, _)| small.contains(a) || small.contains(b));
@@ -341,7 +341,7 @@ fn pam(x: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
         .min_by(|&a, &b| {
             let sa: f64 = x.iter().map(|&v| dist(x[a], v)).sum();
             let sb: f64 = x.iter().map(|&v| dist(x[b], v)).sum();
-            sa.partial_cmp(&sb).unwrap()
+            sa.total_cmp(&sb)
         })
         .unwrap();
     medoids.push(first);
@@ -355,7 +355,7 @@ fn pam(x: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             .max_by(|&a, &b| {
                 let ga: f64 = (0..n).map(|i| (nd[i] - dist(x[i], x[a])).max(0.0)).sum();
                 let gb: f64 = (0..n).map(|i| (nd[i] - dist(x[i], x[b])).max(0.0)).sum();
-                ga.partial_cmp(&gb).unwrap()
+                ga.total_cmp(&gb)
             })
             .unwrap();
         medoids.push(cand);
@@ -392,7 +392,7 @@ fn pam(x: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             medoids
                 .iter()
                 .enumerate()
-                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).partial_cmp(&dist(x[i], x[b])).unwrap())
+                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
                 .map(|(pos, _)| pos)
                 .unwrap()
         })
@@ -476,7 +476,7 @@ fn pamk_capped(core_vals: &[f64], kmin: usize, kmax: usize) -> (Vec<usize>, Vec<
 fn representatives(vals: &[f64], cap: usize) -> (Vec<f64>, Vec<f64>, Vec<usize>) {
     let n = vals.len();
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| vals[a].partial_cmp(&vals[b]).unwrap());
+    order.sort_by(|&a, &b| vals[a].total_cmp(&vals[b]));
 
     let mut uniq = 1usize;
     for w in 1..n {
@@ -560,7 +560,7 @@ fn pam_w(x: &[f64], w: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
         .min_by(|&a, &b| {
             let sa: f64 = (0..n).map(|j| w[j] * dist(x[a], x[j])).sum();
             let sb: f64 = (0..n).map(|j| w[j] * dist(x[b], x[j])).sum();
-            sa.partial_cmp(&sb).unwrap()
+            sa.total_cmp(&sb)
         })
         .unwrap();
     medoids.push(first);
@@ -573,7 +573,7 @@ fn pam_w(x: &[f64], w: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             .max_by(|&a, &b| {
                 let ga: f64 = (0..n).map(|i| w[i] * (nd[i] - dist(x[i], x[a])).max(0.0)).sum();
                 let gb: f64 = (0..n).map(|i| w[i] * (nd[i] - dist(x[i], x[b])).max(0.0)).sum();
-                ga.partial_cmp(&gb).unwrap()
+                ga.total_cmp(&gb)
             })
             .unwrap();
         medoids.push(cand);
@@ -606,7 +606,7 @@ fn pam_w(x: &[f64], w: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             medoids
                 .iter()
                 .enumerate()
-                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).partial_cmp(&dist(x[i], x[b])).unwrap())
+                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
                 .map(|(pos, _)| pos)
                 .unwrap()
         })
@@ -687,20 +687,20 @@ fn mean(v: &[f64]) -> f64 {
 
 fn argmax(v: &[f64]) -> usize {
     (0..v.len())
-        .max_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap())
+        .max_by(|&a, &b| v[a].total_cmp(&v[b]))
         .unwrap()
 }
 
 fn argmin(v: &[f64]) -> usize {
     (0..v.len())
-        .min_by(|&a, &b| v[a].partial_cmp(&v[b]).unwrap())
+        .min_by(|&a, &b| v[a].total_cmp(&v[b]))
         .unwrap()
 }
 
 /// Type-7 (R default) quantile over non-NA values.
 fn quantile(values: &[f64], p: f64) -> f64 {
     let mut v: Vec<f64> = values.iter().cloned().filter(|x| !x.is_nan()).collect();
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.sort_by(|a, b| a.total_cmp(b));
     let n = v.len();
     if n == 0 {
         return f64::NAN;
