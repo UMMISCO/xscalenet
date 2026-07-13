@@ -39,11 +39,12 @@ cargo build --release
 ## Usage
 
 ```sh
-xscalenet <input.tsv> <output_dir> [options]
+xscalenet <input(.tsv|.gz)> <output_dir> [options]
 ```
 
-`input.tsv`: tab-separated, **features in columns, observations in rows**, with a
-header of feature names.
+`input`: tab-separated, **features in columns, observations in rows**, with a
+header of feature names. Plain or gzip (`.gz`) is auto-detected. Use `--transpose`
+for a features-in-rows matrix (feature id in column 1, header = observation ids).
 
 | Option | Default | Meaning |
 |--------|---------|---------|
@@ -55,11 +56,23 @@ header of feature names.
 | `--restart` | `21` | hill-climbing random restarts |
 | `--seed` | `6196` | PRNG seed |
 | `--discretize` | off | PAM-discretize numeric columns first |
+| `--transpose` | off | input has features in rows |
+| `--edges-only` | off | write only present edges (skip absent pairs) |
+| `--max-clusters` | `5` | max PAM clusters per discretized column |
+| `--maxp` | unlimited | max parents per node (hill-climbing) |
+| `--max-iter` | `10000` | hill-climbing iteration cap |
+| `--iss` | `1.0` | BDeu imaginary sample size |
 
-Example (matches the README `scs` call in the R package):
+Example (matches the `scs` call in the R package):
 
 ```sh
-xscalenet scalenet/inst/extdata/pop2mat.txt out --discretize
+xscalenet ../scalenet/inst/extdata/pop2mat.txt out --discretize
+```
+
+Or run directly on a raw gzipped, features-in-rows matrix:
+
+```sh
+xscalenet all_samples.20M.nsat.gz out --transpose --discretize
 ```
 
 ### Outputs (same layout as the R package)

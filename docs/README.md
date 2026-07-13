@@ -27,12 +27,14 @@ embedded reconstruction methods into one robust network.
 
 ```sh
 cargo build --release
-./target/release/xscalenet <input.tsv> <output_dir> [options]
+./target/release/xscalenet <input(.tsv|.gz)> <output_dir> [options]
+cargo test --release        # regression suite (bundled pop2mat fixtures)
 ```
 
-`input.tsv` is tab-separated with **features in columns, observations in rows**
-and a header of feature names. See [architecture.md](architecture.md#cli) for the
-full option list and output layout.
+Input is tab-separated with **features in columns, observations in rows** and a
+header of feature names; plain or gzip is auto-detected, and `--transpose` accepts
+a features-in-rows matrix. See [architecture.md](architecture.md#cli) for the full
+option list and output layout.
 
 ## Project status
 

@@ -1,9 +1,10 @@
 # Architecture
 
-`xscalenet` is a small (~2 kLOC), self-contained Rust crate with three
+`xscalenet` is a small (~2 kLOC), self-contained Rust crate with four
 dependencies: **nalgebra** (dense symmetric eigendecomposition), **rayon**
-(data-parallelism), and **libm** (`lgamma` for BDeu). No LAPACK, no serde, no I/O
-framework — TSV parsing and the CLI are hand-rolled.
+(data-parallelism), **libm** (`lgamma` for BDeu), and **flate2** (pure-Rust gzip
+input). No LAPACK, no serde, no I/O framework — TSV parsing and the CLI are
+hand-rolled.
 
 ## End-to-end pipeline
 
@@ -82,8 +83,10 @@ Gather, `fill_ecorr`, consensus, and output are currently serial.
 ## CLI
 
 ```
-xscalenet <input.tsv> <output_dir> [options]
+xscalenet <input(.tsv|.gz)> <output_dir> [options]
 ```
+
+Input is auto-detected as plain or gzip. `--transpose` accepts features-in-rows.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -95,6 +98,12 @@ xscalenet <input.tsv> <output_dir> [options]
 | `--restart` | `21` | hill-climbing random restarts |
 | `--seed` | `6196` | PRNG seed |
 | `--discretize` | off | PAM-discretize numeric columns first |
+| `--transpose` | off | input has features in rows (feature id in col 1) |
+| `--edges-only` | off | write only present edges |
+| `--max-clusters` | `5` | max PAM clusters per discretized column |
+| `--maxp` | unlimited | max parents per node (hill-climbing) |
+| `--max-iter` | `10000` | hill-climbing iteration cap |
+| `--iss` | `1.0` | BDeu imaginary sample size |
 
 ### Output layout (same as the R package)
 
