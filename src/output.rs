@@ -6,11 +6,36 @@ use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+use crate::analysis::NetworkAnalysis;
 use crate::enrichment::EnrichmentTerm;
 use crate::metrics::GraphMetrics;
 use crate::multilayer::ThemeProximity;
-use crate::network::{Network, RankedEdge};
+use crate::network::{Network, Orientation, RankedEdge};
 use crate::util::{fmt, pair_index};
+
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn json_num(x: Option<f64>) -> String {
+    match x {
+        Some(v) if v.is_finite() => format!("{v}"),
+        _ => "null".to_string(),
+    }
+}
 
 fn fmt_opt(x: Option<f64>) -> String {
     match x {
@@ -160,6 +185,113 @@ pub fn write_theme_network(path: &Path, tp: &ThemeProximity) -> std::io::Result<
             fmt(tp.distance[a][b]),
         )?;
     }
+    f.flush()?;
+    Ok(())
+}
+
+/// Write a self-contained JSON graph (nodes + metrics + annotation, edges, and
+/// the optional theme-proximity layer) for a web frontend / IntegraNet.
+pub fn write_json(
+    path: &Path,
+    nodes: &[String],
+    net: &Network,
+    an: &NetworkAnalysis,
+) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = BufWriter::new(fs::File::create(path)?);
+    writeln!(f, "{{")?;
+
+    // Nodes.
+    writeln!(f, "  \"nodes\": [")?;
+    for (i, name) in nodes.iter().enumerate() {
+        let m = &an.metrics.nodes[i];
+        let annot = an
+            .labels
+            .get(i)
+            .and_then(|l| *l)
+            .and_then(|t| an.themes.get(t))
+            .map(|s| json_str(s))
+            .unwrap_or_else(|| "null".to_string());
+        let atc = an.atc.as_ref().map(|a| a[i]);
+        let atc_last = an.atc_last.as_ref().map(|a| a[i]);
+        let comma = if i + 1 < nodes.len() { "," } else { "" };
+        writeln!(
+            f,
+            "    {{\"id\": {}, \"community\": {}, \"annotation\": {}, \"degree\": {}, \"strength\": {}, \"betweenness\": {}, \"closeness\": {}, \"clustering\": {}, \"modular_degree\": {}, \"modular_betweenness\": {}, \"atc\": {}, \"atc_last\": {}}}{}",
+            json_str(name),
+            m.community,
+            annot,
+            m.degree,
+            json_num(Some(m.strength)),
+            json_num(Some(m.betweenness)),
+            json_num(Some(m.closeness)),
+            json_num(Some(m.clustering)),
+            m.modular_degree,
+            json_num(Some(m.modular_betweenness)),
+            json_num(atc),
+            json_num(atc_last),
+            comma,
+        )?;
+    }
+    writeln!(f, "  ],")?;
+
+    // Edges.
+    writeln!(f, "  \"edges\": [")?;
+    for (k, e) in net.edges.iter().enumerate() {
+        let dir = match e.orientation {
+            Orientation::Forward => "forward",
+            Orientation::Backward => "backward",
+            Orientation::Undirected => "undirected",
+        };
+        let comma = if k + 1 < net.edges.len() { "," } else { "" };
+        writeln!(
+            f,
+            "    {{\"source\": {}, \"target\": {}, \"orientation\": {}, \"score\": {}, \"ecorr\": {}}}{}",
+            json_str(&nodes[e.source]),
+            json_str(&nodes[e.target]),
+            json_str(dir),
+            json_num(e.presence_score),
+            json_num(e.ecorr),
+            comma,
+        )?;
+    }
+    write!(f, "  ]")?;
+
+    // Optional theme-proximity layer.
+    if let Some(tp) = &an.theme_network {
+        writeln!(f, ",")?;
+        writeln!(f, "  \"theme_network\": {{")?;
+        let themes = tp
+            .themes
+            .iter()
+            .map(|t| json_str(t))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(f, "    \"themes\": [{themes}],")?;
+        writeln!(f, "    \"edges\": [")?;
+        let m = tp.themes.len();
+        let mut first = true;
+        for a in 0..m {
+            for b in (a + 1)..m {
+                if !first {
+                    writeln!(f, ",")?;
+                }
+                first = false;
+                write!(
+                    f,
+                    "      {{\"source\": {}, \"target\": {}, \"proximity\": {}}}",
+                    json_str(&tp.themes[a]),
+                    json_str(&tp.themes[b]),
+                    json_num(Some(tp.proximity[a][b])),
+                )?;
+            }
+        }
+        writeln!(f, "\n    ]")?;
+        write!(f, "  }}")?;
+    }
+    writeln!(f, "\n}}")?;
     f.flush()?;
     Ok(())
 }

@@ -20,16 +20,18 @@
 //!   --maxp N                      max parents per node in hill-climbing (default: unlimited)
 //!   --max-iter 10000              hill-climbing iteration cap
 //!   --iss 1.0                     BDeu imaginary sample size
+//!   --metrics                     per-node topological metrics on the consensus network
+//!   --atc annot.tsv               propagate a node annotation (ATC centrality)
+//!   --atc-col NAME                annotation column to propagate (default: col 2)
+//!   --theme-network               build the multi-layer theme-proximity network
+//!   --json                        also export graph.json (nodes+metrics+edges+theme layer)
 
 use std::path::PathBuf;
 use std::process::exit;
 
-use xscalenet::atc;
+use xscalenet::analysis;
 use xscalenet::data::Dataset;
 use xscalenet::discretize;
-use xscalenet::enrichment;
-use xscalenet::metrics;
-use xscalenet::multilayer;
 use xscalenet::output;
 use xscalenet::pipeline::RunConfig;
 use xscalenet::scalenet::{Method, Params};
@@ -48,6 +50,7 @@ struct Args {
     atc_file: Option<String>,
     atc_col: Option<String>,
     theme_network: bool,
+    json: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -58,7 +61,8 @@ fn parse_args() -> Result<Args, String> {
              [--var-perc 0.2] [--eigen-perc auto] [--thresh 0.3,0.8] \
              [--epsilon 0.001] [--restart 21] [--seed 6196] [--discretize] \
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
-             [--max-iter 10000] [--iss 1.0]",
+             [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
+             [--atc-col NAME] [--theme-network] [--json]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));
     }
@@ -75,6 +79,7 @@ fn parse_args() -> Result<Args, String> {
     let mut atc_file: Option<String> = None;
     let mut atc_col: Option<String> = None;
     let mut theme_network = false;
+    let mut json = false;
     let mut params = Params {
         var_perc: 0.2,
         eigen_perc: None,
@@ -113,6 +118,7 @@ fn parse_args() -> Result<Args, String> {
             "--atc" => atc_file = Some(value()?),
             "--atc-col" => atc_col = Some(value()?),
             "--theme-network" => theme_network = true,
+            "--json" => json = true,
             "--methods" => {
                 methods = value()?
                     .split(',')
@@ -160,6 +166,7 @@ fn parse_args() -> Result<Args, String> {
         atc_file,
         atc_col,
         theme_network,
+        json,
     })
 }
 
@@ -337,88 +344,52 @@ fn run() -> Result<(), String> {
             )?),
             None => None,
         };
+        let acfg = analysis::AnalysisConfig {
+            weighted: args.metrics_weighted,
+            theme_network: args.theme_network,
+        };
         for (ti, thr) in result.thresholds.iter().enumerate() {
             let net = &result.consensus[ti].network;
-            let g = metrics::Graph::from_network(net, result.nodes.len(), args.metrics_weighted);
-            let gm = metrics::compute(&g);
-            let atc = atc_labels.as_ref().map(|(labels, themes)| {
-                let t0 = atc::membership_from_labels(labels, themes.len());
-                let cfg = atc::AtcConfig {
-                    weighted: args.metrics_weighted,
-                    ..Default::default()
-                };
-                let r = atc::compute(&g, &t0, &cfg);
-                (r.atc, r.atc_last_config)
-            });
-            eprintln!(
-                "# Analysis @ presFreq {thr}: {} nodes, {} edges, {} communities, modularity {:.3}{}",
-                gm.n_nodes,
-                gm.n_edges,
-                gm.n_communities,
-                gm.modularity,
-                atc.as_ref()
-                    .map(|_| format!(", ATC over {} themes", atc_labels.as_ref().unwrap().1.len()))
-                    .unwrap_or_default(),
-            );
-            let path: PathBuf = [
+            let annot = atc_labels.as_ref().map(|(l, t)| (l.as_slice(), t.as_slice()));
+            let an = analysis::analyze(net, result.nodes.len(), annot, &acfg);
+
+            let base: PathBuf = [
                 &args.outdir,
                 "consensusGraph",
                 &format!("globalNet_presFreq{thr}"),
-                "nodeAnalysis.txt",
             ]
             .iter()
             .collect();
-            let atc_ref = atc.as_ref().map(|(a, al)| (a.as_slice(), al.as_slice()));
-            output::write_node_analysis(&path, &result.nodes, &gm, atc_ref)
+            eprintln!(
+                "# Analysis @ presFreq {thr}: {} nodes, {} edges, {} communities, modularity {:.3}{}",
+                an.metrics.n_nodes,
+                an.metrics.n_edges,
+                an.metrics.n_communities,
+                an.metrics.modularity,
+                if an.atc.is_some() {
+                    format!(", ATC over {} themes", an.themes.len())
+                } else {
+                    String::new()
+                },
+            );
+
+            let atc_ref = match (&an.atc, &an.atc_last) {
+                (Some(a), Some(al)) => Some((a.as_slice(), al.as_slice())),
+                _ => None,
+            };
+            output::write_node_analysis(&base.join("nodeAnalysis.txt"), &result.nodes, &an.metrics, atc_ref)
                 .map_err(|e| format!("write node analysis: {e}"))?;
-
-            // Per-module annotation enrichment (Fisher) when an annotation is given.
-            if let Some((labels, themes)) = atc_labels.as_ref() {
-                let ref_terms: Vec<String> =
-                    labels.iter().filter_map(|l| l.map(|t| themes[t].clone())).collect();
-                let mut by_comm: std::collections::BTreeMap<usize, Vec<String>> =
-                    std::collections::BTreeMap::new();
-                for (i, nm) in gm.nodes.iter().enumerate() {
-                    if let Some(t) = labels[i] {
-                        by_comm.entry(nm.community).or_default().push(themes[t].clone());
-                    }
-                }
-                let per_module: Vec<(usize, Vec<enrichment::EnrichmentTerm>)> = by_comm
-                    .into_iter()
-                    .map(|(c, interest)| {
-                        (c, enrichment::enrichment_analysis(&interest, &ref_terms))
-                    })
-                    .collect();
-                let epath: PathBuf = [
-                    &args.outdir,
-                    "consensusGraph",
-                    &format!("globalNet_presFreq{thr}"),
-                    "enrichment.txt",
-                ]
-                .iter()
-                .collect();
-                output::write_enrichment(&epath, &per_module)
+            if !an.enrichment.is_empty() {
+                output::write_enrichment(&base.join("enrichment.txt"), &an.enrichment)
                     .map_err(|e| format!("write enrichment: {e}"))?;
-
-                // Multi-layer theme-proximity network.
-                if args.theme_network {
-                    let t0 = atc::membership_from_labels(labels, themes.len());
-                    let tcfg = multilayer::ThemeConfig {
-                        weighted: args.metrics_weighted,
-                        ..Default::default()
-                    };
-                    let tp = multilayer::theme_proximity(&g, &t0, themes, &tcfg);
-                    let tpath: PathBuf = [
-                        &args.outdir,
-                        "consensusGraph",
-                        &format!("globalNet_presFreq{thr}"),
-                        "themeNetwork.txt",
-                    ]
-                    .iter()
-                    .collect();
-                    output::write_theme_network(&tpath, &tp)
-                        .map_err(|e| format!("write theme network: {e}"))?;
-                }
+            }
+            if let Some(tp) = &an.theme_network {
+                output::write_theme_network(&base.join("themeNetwork.txt"), tp)
+                    .map_err(|e| format!("write theme network: {e}"))?;
+            }
+            if args.json {
+                output::write_json(&base.join("graph.json"), &result.nodes, net, &an)
+                    .map_err(|e| format!("write json: {e}"))?;
             }
         }
     }

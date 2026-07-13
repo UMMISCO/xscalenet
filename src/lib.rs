@@ -6,6 +6,7 @@
 //! [`Network`]s). The CLI is a thin wrapper that loads the data and formats the
 //! result; see [`output`] for the R-compatible writers.
 
+pub mod analysis;
 pub mod aracne;
 pub mod atc;
 pub mod data;
