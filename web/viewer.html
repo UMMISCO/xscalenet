@@ -123,6 +123,10 @@ document.getElementById('color').onclick=e=>{ colorBy = colorBy==='community'?'n
 document.getElementById('size').onclick=e=>{ sizeBy = sizeBy==='atc'?'degree':'atc'; e.target.textContent='size: '+sizeBy; draw(); };
 document.getElementById('restart').onclick=()=>restart();
 resize();
+// Auto-load the bundled example when served over http(s) (fetch is blocked on file://).
+if(location.protocol.startsWith('http')){
+  fetch('example.graph.json').then(r=>r.ok?r.json():Promise.reject()).then(g=>{ resize(); load(g); }).catch(()=>{});
+}
 </script>
 </body>
 </html>
