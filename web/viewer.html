@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+  Minimal, dependency-free previewer for an xscalenet `graph.json` (produced with
+  `--json`). NOT the IntegraNet app — just a quick way to eyeball engine output.
+  Open this file in a browser and load a graph.json. Everything runs locally.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>xscalenet viewer</title>
+<style>
+  :root { --bg:#0e1116; --fg:#e6edf3; --muted:#8b949e; --panel:#161b22; --line:#30363d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:13px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; }
+  header .sp { color:var(--muted); }
+  button, label.file { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 10px; cursor:pointer; }
+  button.active { border-color:#2f81f7; color:#2f81f7; }
+  input[type=file] { display:none; }
+  #wrap { display:flex; height:calc(100vh - 46px); }
+  #cv { flex:1; display:block; background:radial-gradient(1200px 600px at 50% 40%, #12171f, #0e1116); }
+  #side { width:280px; border-left:1px solid var(--line); padding:12px 14px; overflow:auto; background:var(--panel); }
+  #side h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:14px 0 6px; }
+  #stats div, #hover div { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+  #stats b, #hover b { color:var(--fg); font-variant-numeric:tabular-nums; }
+  .k { color:var(--muted); }
+  #themes .te { display:flex; justify-content:space-between; padding:2px 0; }
+  .bar { height:6px; background:#2f81f7; border-radius:3px; }
+  #tip { position:fixed; pointer-events:none; background:#000c; border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:12px; display:none; max-width:240px; }
+  .hint { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>xscalenet <span class="sp">graph viewer</span></h1>
+  <label class="file"><input type="file" id="file" accept=".json"> Load graph.json</label>
+  <button id="color" class="active">color: community</button>
+  <button id="size" class="active">size: atc</button>
+  <button id="restart">re-layout</button>
+  <span class="hint" id="hint">Load a graph.json (run xscalenet with <code>--json</code>).</span>
+</header>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="side">
+    <h2>Network</h2>
+    <div id="stats"></div>
+    <h2>Theme network</h2>
+    <div id="themes"><span class="hint">— (needs --theme-network)</span></div>
+    <h2>Hover</h2>
+    <div id="hover"><span class="hint">Hover a node.</span></div>
+  </div>
+</div>
+<div id="tip"></div>
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const tip = document.getElementById('tip');
+let G=null, nodes=[], edges=[], idIndex={}, colorBy='community', sizeBy='atc', anim=null, dpr=1;
+
+function resize(){ dpr=devicePixelRatio||1; cv.width=cv.clientWidth*dpr; cv.height=cv.clientHeight*dpr; }
+addEventListener('resize', ()=>{ resize(); });
+
+const palette = ['#2f81f7','#3fb950','#db6d28','#a371f7','#e3b341','#f85149','#39c5cf','#db61a2','#7ee787','#ffa657','#79c0ff','#d2a8ff'];
+function colorOf(n){
+  if(colorBy==='community') return palette[(n.community??0)%palette.length];
+  return '#79c0ff';
+}
+function sizeOf(n){
+  const v = sizeBy==='atc' ? (n.atc??0) : (n.degree??1)/20;
+  return 3 + 22*Math.sqrt(Math.max(0,v));
+}
+
+function load(g){
+  G=g; idIndex={};
+  nodes=(g.results?g.results[0]:g).nodes || g.nodes || [];
+  const rr = g.results?g.results[0]:g;
+  edges = rr.edges || [];
+  nodes.forEach((n,i)=>{ idIndex[n.id]=i; n.x=cv.clientWidth/2+(Math.random()-.5)*300; n.y=cv.clientHeight/2+(Math.random()-.5)*300; n.vx=0; n.vy=0; });
+  document.getElementById('hint').style.display='none';
+  // stats
+  const comm = new Set(nodes.map(n=>n.community));
+  document.getElementById('stats').innerHTML =
+    row('nodes', nodes.length)+row('edges', edges.length)+row('communities', comm.size||'—');
+  // theme network
+  const tn = rr.theme_network;
+  const td = document.getElementById('themes');
+  if(tn && tn.edges && tn.edges.length){
+    const mx = Math.max(...tn.edges.map(e=>e.proximity||0),1e-9);
+    td.innerHTML = tn.edges.slice().sort((a,b)=>b.proximity-a.proximity).map(e=>
+      `<div class="te"><span>${e.source} – ${e.target}</span><span style="display:flex;align-items:center;gap:6px"><span class="bar" style="width:${40*e.proximity/mx}px"></span><b>${(e.proximity).toFixed(3)}</b></span></div>`).join('');
+  } else td.innerHTML='<span class="hint">— (needs --theme-network)</span>';
+  restart();
+}
+function row(k,v){ return `<div><span class="k">${k}</span><b>${v}</b></div>`; }
+
+function restart(){ if(anim) cancelAnimationFrame(anim); let t=0; step(); function step(){ t++; layout(); draw(); if(t<600) anim=requestAnimationFrame(step);} }
+function layout(){
+  const W=cv.clientWidth, H=cv.clientHeight, k=Math.sqrt(W*H/Math.max(1,nodes.length))*0.5;
+  for(let i=0;i<nodes.length;i++){ const a=nodes[i]; a.vx*=.85; a.vy*=.85;
+    for(let j=i+1;j<nodes.length;j++){ const b=nodes[j]; let dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy)||1; const f=k*k/d/d*4; a.vx+=dx/d*f; a.vy+=dy/d*f; b.vx-=dx/d*f; b.vy-=dy/d*f; } }
+  for(const e of edges){ const a=nodes[idIndex[e.source]], b=nodes[idIndex[e.target]]; if(!a||!b)continue; let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.02; a.vx+=dx/d*f; a.vy+=dy/d*f; b.vx-=dx/d*f; b.vy-=dy/d*f; }
+  for(const n of nodes){ n.vx+=(W/2-n.x)*0.002; n.vy+=(H/2-n.y)*0.002; n.x+=Math.max(-8,Math.min(8,n.vx)); n.y+=Math.max(-8,Math.min(8,n.vy)); }
+}
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,cv.clientWidth,cv.clientHeight);
+  ctx.lineWidth=.6;
+  for(const e of edges){ const a=nodes[idIndex[e.source]], b=nodes[idIndex[e.target]]; if(!a||!b)continue;
+    const neg = (e.ecorr!=null && e.ecorr<0); ctx.strokeStyle = neg? 'rgba(248,81,73,.35)':'rgba(139,148,158,.28)';
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+  for(const n of nodes){ const r=sizeOf(n); ctx.beginPath(); ctx.arc(n.x,n.y,r,0,7); ctx.fillStyle=colorOf(n); ctx.globalAlpha=.9; ctx.fill(); ctx.globalAlpha=1; ctx.lineWidth=.8; ctx.strokeStyle='#0e1116'; ctx.stroke(); }
+}
+cv.addEventListener('mousemove', ev=>{
+  const mx=ev.clientX-cv.getBoundingClientRect().left, my=ev.clientY-cv.getBoundingClientRect().top;
+  let hit=null; for(const n of nodes){ if(Math.hypot(n.x-mx,n.y-my)<sizeOf(n)+2){hit=n;break;} }
+  if(hit){ tip.style.display='block'; tip.style.left=(ev.clientX+12)+'px'; tip.style.top=(ev.clientY+12)+'px';
+    tip.innerHTML = `<b>${hit.id}</b>`;
+    document.getElementById('hover').innerHTML = ['community','annotation','degree','betweenness','clustering','atc','atc_last']
+      .filter(k=>hit[k]!=null).map(k=>`<div><span class="k">${k}</span><b>${typeof hit[k]==='number'?(+hit[k]).toFixed(4):hit[k]}</b></div>`).join('');
+  } else { tip.style.display='none'; }
+});
+document.getElementById('file').addEventListener('change', ev=>{ const f=ev.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{ try{ resize(); load(JSON.parse(rd.result)); }catch(e){ alert('Invalid JSON: '+e); } }; rd.readAsText(f); });
+document.getElementById('color').onclick=e=>{ colorBy = colorBy==='community'?'none':'community'; e.target.classList.toggle('active', colorBy==='community'); e.target.textContent='color: '+colorBy; draw(); };
+document.getElementById('size').onclick=e=>{ sizeBy = sizeBy==='atc'?'degree':'atc'; e.target.textContent='size: '+sizeBy; draw(); };
+document.getElementById('restart').onclick=()=>restart();
+resize();
+</script>
+</body>
+</html>
