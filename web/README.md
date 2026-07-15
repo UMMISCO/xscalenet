@@ -27,6 +27,33 @@ The demo is the exact graph `J` + membership `m0` that xscalenet validates
 against R (`src/atc.rs::matches_r_dynamic_propagation`): 10 nodes, 3 themes
 (brown / black / yellow), converging at step 2.
 
+## network browser — `network.html`
+
+Canvas view of a reconstructed network (`graph.json`) for exploring larger
+graphs:
+
+- **Colour by taxonomy / annotation** — a dropdown over any categorical node
+  field (phylum, family, …) with a click-to-toggle legend.
+- **Edge filters** — min `|ecorr|`, sign (both ± / positive / negative), min
+  presence score, keep top-N by `|ecorr|`, and min node degree. All live.
+- **Scale-free topology** — fits the degree distribution to a power law
+  `P(k) ~ k^−γ` (log-log linear regression), reports **γ, R², k_max**, judges it
+  against the scale-free criteria (Barabási's 2 ≤ γ ≤ 3; WGCNA's R² ≥ 0.80), and
+  **recommends a min-|ecorr| threshold** that maximises the power-law fit while
+  keeping a meaningful fraction of nodes. One click applies it.
+- Hover for taxonomy + degree; drag nodes, scroll to zoom, pan the background.
+
+Shareable views via URL query: `network.html?ec=0.4&sign=pos&colorby=phylum`.
+
+```sh
+cd web && python3 -m http.server      # http://localhost:8000/network.html
+```
+
+The bundled SCAPIS demo (`scapis.graph.json`) is **client data and is
+gitignored** — generate it from the R analyses with
+`.private/tools/scapis_to_graphjson.py`, or drop in any `graph.json` via
+**Load graph.json**.
+
 ## graph previewer — `viewer.html`
 
 A minimal previewer for a plain `--json` `graph.json` (nodes + edges + metrics +

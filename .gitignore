@@ -2,3 +2,5 @@ scalenet/
 target/
 .private/
 out/
+web/scapis.graph.json
+.DS_Store

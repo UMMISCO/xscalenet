@@ -1,0 +1,514 @@
+<!doctype html>
+<!--
+  xscalenet — network browser.
+
+  Canvas view of a reconstructed network (graph.json): colour by taxonomy /
+  annotation, filter edges by |ecorr| / sign / score / top-N and nodes by
+  degree, and analyse scale-free topology (power-law degree fit, γ & R²) with a
+  Barabási/WGCNA-based threshold recommendation.
+
+  Self-contained, dependency-free. Serve over http and it auto-loads
+  scapis.graph.json (client data, gitignored); otherwise use "Load graph.json".
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xscalenet · network browser</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#1a1f26; --muted:#6b7480; --line:#e3e7ec;
+    --line2:#eef1f4; --accent:#2f6df6; --neg:#e5534b; --pos:#8b98a6;
+    --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 16px rgba(20,30,50,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#0f1216;--panel:#161b22;--ink:#e6edf3;--muted:#8b949e;--line:#262c34;
+      --line2:#20252c;--accent:#4d8bff;--shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.35);}
+  }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  header{display:flex;align-items:center;gap:16px;padding:11px 18px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .brand{display:flex;flex-direction:column;line-height:1.2}
+  .brand b{font-size:15px;font-weight:650;letter-spacing:-.01em}
+  .brand span{font-size:11.5px;color:var(--muted)}
+  .grow{flex:1}
+  .btn{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;
+    padding:6px 11px;cursor:pointer;font:inherit;font-size:12.5px;font-weight:500;display:inline-flex;
+    align-items:center;gap:6px;transition:.12s;text-decoration:none}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.06);color:#fff}
+  input[type=file]{display:none}
+
+  #app{display:grid;grid-template-columns:1fr 350px;height:calc(100vh - 57px)}
+  #stage{position:relative;min-width:0;background:radial-gradient(130% 130% at 50% 25%, var(--panel), var(--bg))}
+  #cv{width:100%;height:100%;display:block;cursor:grab}
+  #cv.drag{cursor:grabbing}
+  .badge{position:absolute;top:14px;left:16px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:9px 13px;box-shadow:var(--shadow);max-width:62%}
+  .badge b{font-weight:650}.badge .m{color:var(--muted)}
+  #tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;padding:8px 10px;box-shadow:var(--shadow);font-size:12px;display:none;max-width:260px;z-index:5}
+  #tip .t{font-weight:650;margin-bottom:3px}
+  #tip .r{display:flex;justify-content:space-between;gap:12px;color:var(--muted)}
+  #tip .r b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+  aside{background:var(--panel);border-left:1px solid var(--line);overflow:auto}
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line2)}
+  .sec h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650;
+    display:flex;justify-content:space-between;align-items:center}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
+  .kv .k{color:var(--muted)} .kv b{font-variant-numeric:tabular-nums;font-weight:600}
+  label.row{display:flex;flex-direction:column;gap:5px;margin:10px 0}
+  label.row .lh{display:flex;justify-content:space-between;font-size:12px}
+  label.row .lh b{font-variant-numeric:tabular-nums}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;background:var(--line);outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;
+    background:var(--accent);border:2px solid var(--panel);box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--accent);border:2px solid var(--panel)}
+  select{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit}
+  .seg{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .seg button{flex:1;background:var(--panel);border:0;border-right:1px solid var(--line);color:var(--muted);
+    padding:6px 4px;cursor:pointer;font:inherit;font-size:12px}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#fff}
+  .legend{display:flex;flex-direction:column;gap:3px;margin-top:2px}
+  .legend .li{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;padding:1px 0;border-radius:4px}
+  .legend .li:hover{background:var(--line2)}
+  .legend .li.off{opacity:.35}
+  .legend .sw{width:12px;height:12px;border-radius:3px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+  .legend .li .c{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  /* scale-free */
+  #sf{width:100%;height:150px;display:block;background:var(--bg);border-radius:8px}
+  .verdict{margin-top:9px;padding:8px 10px;border-radius:8px;font-size:12.5px;background:var(--line2)}
+  .verdict.good{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .verdict b{font-variant-numeric:tabular-nums}
+  .rec{margin-top:9px;font-size:12px;color:var(--muted)}
+  .rec b{color:var(--ink)}
+  .hint{color:var(--muted);font-size:12px}
+  code{background:var(--line2);padding:1px 4px;border-radius:4px;font-size:11.5px}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>xscalenet</b><span>network browser</span></div>
+  <div class="grow"></div>
+  <a class="btn" href="index.html">◐ Propagation player</a>
+  <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
+  <button class="btn" id="relayout">Re-layout</button>
+</header>
+
+<div id="app">
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div class="badge" id="badge"></div>
+    <div id="tip"></div>
+  </div>
+  <aside>
+    <div class="sec">
+      <h2>Network</h2>
+      <div id="stats"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Colour by</h2>
+      <select id="colorby"></select>
+      <div class="legend" id="legend" style="margin-top:9px"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Edge filters</h2>
+      <label class="row"><span class="lh">min |ecorr| <b id="ecv"></b></span>
+        <input type="range" id="ec" min="0" max="1" step="0.001"></label>
+      <div class="seg" id="sign" style="margin:8px 0">
+        <button data-v="all" class="on">both ±</button>
+        <button data-v="pos">positive</button>
+        <button data-v="neg">negative</button>
+      </div>
+      <label class="row"><span class="lh">min presence score <b id="scv"></b></span>
+        <input type="range" id="sc" min="0" max="1" step="0.001" value="0"></label>
+      <label class="row"><span class="lh">keep top-N edges <b id="tnv"></b></span>
+        <input type="range" id="tn" min="10" max="100" step="1" value="100"></label>
+      <label class="row"><span class="lh">min degree <b id="mdv"></b></span>
+        <input type="range" id="md" min="0" max="10" step="1" value="0"></label>
+    </div>
+
+    <div class="sec">
+      <h2>Scale-free topology <span class="hint" id="sfnote"></span></h2>
+      <canvas id="sf"></canvas>
+      <div class="verdict" id="verdict"></div>
+      <div class="rec" id="rec"></div>
+      <button class="btn primary" id="applyrec" style="margin-top:9px;width:100%;justify-content:center">Apply recommended threshold</button>
+    </div>
+
+    <div class="sec" id="inspect">
+      <h2>Node</h2>
+      <div class="hint">Hover a node.</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const CV=$("#cv"), CTX=CV.getContext("2d");
+const SF=$("#sf"), SFX=SF.getContext("2d");
+let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
+let view={x:0,y:0,k:1}, dpr=1, hot=-1, dragging=null, panning=null, offGroups=new Set();
+let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
+
+// Canvas cannot use CSS var() strings — resolve theme colours to hex once.
+let COL={};
+function readColors(){
+  const s=getComputedStyle(document.documentElement), get=(v,d)=>s.getPropertyValue(v).trim()||d;
+  COL={neg:get('--neg','#e5534b'), pos:get('--pos','#8b98a6'), line:get('--line','#e3e7ec'),
+    panel:get('--panel','#ffffff'), accent:get('--accent','#2f6df6'), ink:get('--ink','#1a1f26'),
+    muted:get('--muted','#6b7480'), bg:get('--bg','#f6f7f9')};
+}
+
+// ---------- load ----------
+function load(g){
+  G=g;
+  nodes=(g.nodes||[]).map((n,i)=>({...n,i,x:0,y:0,vx:0,vy:0}));
+  idx={}; nodes.forEach((n,i)=>idx[n.id]=i);
+  edges=(g.edges||[]).map(e=>({...e,a:idx[e.source],b:idx[e.target]})).filter(e=>e.a!=null&&e.b!=null);
+  // colour options: declared color_by + any string/categorical node field
+  const fields=new Set();
+  for(const n of nodes) for(const k in n) if(typeof n[k]==="string" && !["id","label","color"].includes(k)) fields.add(k);
+  const opts=[g.meta?.color_by, ...fields].filter((v,i,a)=>v&&a.indexOf(v)===i);
+  $("#colorby").innerHTML=opts.map(o=>`<option>${o}</option>`).join("");
+  colorField=g.meta?.color_by||opts[0];
+  $("#colorby").value=colorField;
+
+  // ecorr slider range from data
+  const absE=edges.map(e=>Math.abs(e.ecorr)).filter(v=>isFinite(v));
+  const lo=absE.length?Math.min(...absE):0, hi=absE.length?Math.max(...absE):1;
+  const ec=$("#ec"); ec.min=(Math.floor(lo*100)/100).toFixed(2); ec.max=(Math.ceil(hi*100)/100).toFixed(2);
+  ec.step=0.005; ec.value=ec.min; filt.ec=+ec.min;
+  const sc=$("#sc"); const scs=edges.map(e=>e.score).filter(v=>isFinite(v));
+  if(scs.length){ sc.min=0; sc.max=(Math.ceil(Math.max(...scs)*100)/100).toFixed(2); sc.step=0.005; }
+  $("#tn").max=edges.length; $("#tn").value=edges.length; filt.topN=1;
+  $("#md").max=Math.min(20, Math.max(2,...nodes.map(n=>n.degree||0)));
+
+  buildColors(); seedLayout(); relax(300);
+  // optional shareable view: ?ec=0.4&sign=pos&colorby=phylum
+  const q=new URLSearchParams(location.search);
+  if(q.get("colorby")){ colorField=q.get("colorby"); $("#colorby").value=colorField; buildColors(); }
+  if(q.get("sign")){ filt.sign=q.get("sign");
+    $("#sign").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===filt.sign)); }
+  if(q.get("ec")!=null){ const ec=$("#ec"); ec.value=q.get("ec"); filt.ec=+ec.value; }
+  syncLabels(); apply();
+  const b=$("#badge");
+  b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
+    (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
+}
+
+function buildColors(){
+  // groups + colours for the current colour field
+  if(colorField===(G.meta?.color_by) && G.color_map){
+    groups=G.color_groups.slice(); gcolor={...G.color_map};
+  } else {
+    const cnt={};
+    for(const n of nodes){ const v=n[colorField]||"NA"; cnt[v]=(cnt[v]||0)+1; }
+    groups=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]);
+    const PAL=["#2f6df6","#3fb950","#db6d28","#a371f7","#e3b341","#e5534b","#39c5cf","#db61a2",
+               "#7ee787","#ffa657","#79c0ff","#d2a8ff","#f0883e","#56d364","#bc8cff","#8b949e"];
+    gcolor={}; groups.forEach((g0,i)=>gcolor[g0]=PAL[i%PAL.length]);
+  }
+  offGroups.clear(); drawLegend();
+}
+function groupOf(n){ return n[colorField]||"NA"; }
+function colorOf(n){ return gcolor[groupOf(n)]||n.color||"#8b949e"; }
+
+function drawLegend(){
+  const cnt={}; nodes.forEach(n=>{const v=groupOf(n);cnt[v]=(cnt[v]||0)+1;});
+  $("#legend").innerHTML=groups.map(g0=>
+    `<div class="li ${offGroups.has(g0)?'off':''}" data-g="${g0}">
+      <span class="sw" style="background:${gcolor[g0]}"></span>${g0||'NA'}<span class="c">${cnt[g0]||0}</span></div>`).join("");
+  $("#legend").querySelectorAll(".li").forEach(li=>li.onclick=()=>{
+    const g0=li.dataset.g; offGroups.has(g0)?offGroups.delete(g0):offGroups.add(g0);
+    drawLegend(); apply();
+  });
+}
+
+// ---------- filtering ----------
+function passEdge(e){
+  if(!isFinite(e.ecorr)) return false;
+  if(Math.abs(e.ecorr)<filt.ec) return false;
+  if(filt.sign==="pos"&&e.ecorr<0) return false;
+  if(filt.sign==="neg"&&e.ecorr>=0) return false;
+  if(isFinite(e.score)&&e.score<filt.sc) return false;
+  return true;
+}
+// returns {vedges, vis(nodeVisible), deg}
+function computeVisible(){
+  let es=edges.filter(passEdge);
+  // top-N by |ecorr|
+  const N=Math.round(filt.topN*edges.length);
+  if(es.length>N){ es=es.slice().sort((a,b)=>Math.abs(b.ecorr)-Math.abs(a.ecorr)).slice(0,N); }
+  // node group filter
+  const deg={}; nodes.forEach(n=>deg[n.i]=0);
+  const kept=[];
+  for(const e of es){
+    if(offGroups.has(groupOf(nodes[e.a]))||offGroups.has(groupOf(nodes[e.b]))) continue;
+    kept.push(e); deg[e.a]++; deg[e.b]++;
+  }
+  // min-degree prunes nodes (iteratively would be ideal; one pass is enough for the UI)
+  const visN=new Set();
+  nodes.forEach(n=>{ if(deg[n.i]>=Math.max(1,filt.md) && !offGroups.has(groupOf(n))) visN.add(n.i); });
+  const fe=kept.filter(e=>visN.has(e.a)&&visN.has(e.b));
+  return {edges:fe, visN, deg};
+}
+
+let VIS={edges:[],visN:new Set(),deg:{}};
+function apply(){
+  VIS=computeVisible();
+  drawStats(); render(); scaleFree();
+}
+
+function drawStats(){
+  const g=G.meta||{};
+  $("#stats").innerHTML=
+    kv("nodes shown", `${VIS.visN.size} <span class="k">/ ${nodes.length}</span>`)+
+    kv("edges shown", `${VIS.edges.length} <span class="k">/ ${edges.length}</span>`)+
+    (g.directed!=null?kv("directed", g.directed?"yes":"no"):"")+
+    kv("colour groups", groups.length);
+}
+function kv(k,v){return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`;}
+
+// ---------- layout ----------
+function stageW(){return $("#stage").clientWidth||900;}
+function stageH(){return $("#stage").clientHeight||600;}
+function seedLayout(){
+  const W=stageW(),H=stageH(),cx=W/2,cy=H/2,R=Math.min(W,H)*0.42;
+  nodes.forEach((n,k)=>{const a=2*Math.PI*k/nodes.length;
+    n.x=cx+Math.cos(a)*R*(0.5+0.5*Math.random()); n.y=cy+Math.sin(a)*R*(0.5+0.5*Math.random());});
+}
+function relax(iter){
+  const W=stageW(),H=stageH();
+  const k=Math.sqrt(W*H/Math.max(1,nodes.length))*0.62;
+  // use ALL edges for a stable full-graph layout (filtering only hides)
+  for(let t=0;t<iter;t++){
+    const cool=1-t/iter;
+    for(const n of nodes){n.vx*=0.9;n.vy*=0.9;}
+    // Barnes-hut would be nicer; O(n²) is fine at n≈500
+    for(let i=0;i<nodes.length;i++){const a=nodes[i];
+      for(let j=i+1;j<nodes.length;j++){const b=nodes[j];
+        let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
+        const f=k*k/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
+    for(const e of edges){const a=nodes[e.a],b=nodes[e.b];
+      let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.06;
+      a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
+    const cx=W/2,cy=H/2;
+    for(const n of nodes){n.vx+=(cx-n.x)*0.004;n.vy+=(cy-n.y)*0.004;
+      n.x+=Math.max(-30,Math.min(30,n.vx))*cool; n.y+=Math.max(-30,Math.min(30,n.vy))*cool;}
+  }
+  fitView();
+}
+function fitView(){
+  const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  const W=stageW(),H=stageH(),pad=50;
+  const k=Math.min((W-2*pad)/Math.max(1,maxx-minx),(H-2*pad)/Math.max(1,maxy-miny),2.5);
+  view.k=isFinite(k)&&k>0?k:1;
+  view.x=W/2-((minx+maxx)/2)*view.k; view.y=H/2-((miny+maxy)/2)*view.k;
+}
+
+// ---------- render ----------
+function resize(){ readColors(); dpr=devicePixelRatio||1; CV.width=stageW()*dpr; CV.height=stageH()*dpr;
+  SF.width=(SF.clientWidth||300)*dpr; SF.height=(SF.clientHeight||150)*dpr; }
+function radiusOf(i){ return 2.2+2.4*Math.sqrt(VIS.deg[i]||0); }
+function render(){
+  CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
+  CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
+  const nbr = hot>=0 ? neighbors(hot) : null;
+  // edges
+  CTX.lineWidth=0.8/view.k;
+  for(const e of VIS.edges){
+    const a=nodes[e.a],b=nodes[e.b];
+    const on = !nbr || nbr.has(e.a)||nbr.has(e.b);
+    CTX.globalAlpha = on?(nbr?0.85:0.5):0.06;
+    CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
+    CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke();
+  }
+  CTX.globalAlpha=1;
+  // nodes
+  for(const n of nodes){
+    if(!VIS.visN.has(n.i)) continue;
+    const on = !nbr || nbr.has(n.i);
+    const r=radiusOf(n.i);
+    CTX.globalAlpha=on?1:0.12;
+    CTX.beginPath(); CTX.arc(n.x,n.y,r,0,7); CTX.fillStyle=colorOf(n); CTX.fill();
+    if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
+    else { CTX.lineWidth=0.7/view.k; CTX.strokeStyle=COL.panel; CTX.stroke(); }
+  }
+  CTX.globalAlpha=1; CTX.restore();
+}
+function neighbors(i){ const s=new Set([i]); for(const e of VIS.edges){ if(e.a===i)s.add(e.b); if(e.b===i)s.add(e.a);} return s; }
+
+// ---------- scale-free ----------
+function scaleFreeFit(degMap, ids){
+  const degs=ids.map(i=>degMap[i]||0).filter(d=>d>0);
+  if(degs.length<10) return null;
+  const cnt=new Map(); degs.forEach(d=>cnt.set(d,(cnt.get(d)||0)+1));
+  const tot=degs.length, pts=[];
+  for(const [k,c] of cnt) pts.push({k, x:Math.log10(k), y:Math.log10(c/tot)});
+  if(pts.length<3) return null;
+  const n=pts.length, mx=avg(pts.map(p=>p.x)), my=avg(pts.map(p=>p.y));
+  let sxx=0,sxy=0,syy=0;
+  for(const p of pts){ sxx+=(p.x-mx)**2; sxy+=(p.x-mx)*(p.y-my); syy+=(p.y-my)**2; }
+  if(sxx<=0||syy<=0) return null;
+  const slope=sxy/sxx, r2=(sxy*sxy)/(sxx*syy);
+  return {gamma:-slope, r2, slope, intercept:my-slope*mx, pts, n:tot, kmax:Math.max(...degs)};
+}
+const avg=a=>a.reduce((s,x)=>s+x,0)/a.length;
+
+function scaleFree(){
+  const fit=scaleFreeFit(VIS.deg, [...VIS.visN]);
+  drawSF(fit);
+  const v=$("#verdict");
+  if(!fit){ v.className="verdict"; v.innerHTML="Too few connected nodes to fit."; $("#sfnote").textContent=""; return; }
+  const sf = fit.r2>=0.80;                      // WGCNA scale-free fit index criterion
+  const barabasi = fit.gamma>=2 && fit.gamma<=3; // Barabási's regime for real scale-free nets
+  v.className="verdict"+(sf?" good":"");
+  v.innerHTML=`γ = <b>${fit.gamma.toFixed(2)}</b> · R² = <b>${fit.r2.toFixed(3)}</b> · k<sub>max</sub> = <b>${fit.kmax}</b><br>`+
+    `<span class="hint">${sf?'✓ power-law fit (R²≥0.80)':'✗ weak power-law fit (R²<0.80)'} · `+
+    `${barabasi?'γ in Barabási 2–3 regime':'γ outside 2–3 (dense/small-network regime)'}</span>`;
+  $("#sfnote").textContent = `P(k) ~ k^−γ`;
+  recommend();
+}
+function drawSF(fit){
+  SFX.setTransform(dpr,0,0,dpr,0,0);
+  const W=SF.clientWidth,H=SF.clientHeight,pad=24; SFX.clearRect(0,0,W,H);
+  SFX.strokeStyle=COL.line; SFX.lineWidth=1;
+  SFX.strokeRect(pad,6,W-pad-6,H-pad-6);
+  SFX.fillStyle=COL.muted; SFX.font="10px -apple-system,sans-serif";
+  SFX.fillText("log P(k)",4,14); SFX.textAlign="end"; SFX.fillText("log k",W-8,H-8); SFX.textAlign="start";
+  if(!fit) return;
+  const xs=fit.pts.map(p=>p.x), ys=fit.pts.map(p=>p.y);
+  const xlo=Math.min(...xs),xhi=Math.max(...xs,0.01),ylo=Math.min(...ys),yhi=Math.max(...ys);
+  const X=x=>pad+(W-pad-10)*(xhi>xlo?(x-xlo)/(xhi-xlo):0.5);
+  const Y=y=>6+(H-pad-6)*(yhi>ylo?1-(y-ylo)/(yhi-ylo):0.5);
+  // regression line
+  SFX.strokeStyle=COL.accent; SFX.lineWidth=1.5; SFX.beginPath();
+  SFX.moveTo(X(xlo),Y(fit.intercept+fit.slope*xlo)); SFX.lineTo(X(xhi),Y(fit.intercept+fit.slope*xhi)); SFX.stroke();
+  // points
+  SFX.fillStyle=COL.ink;
+  for(const p of fit.pts){ SFX.beginPath(); SFX.arc(X(p.x),Y(p.y),2.6,0,7); SFX.fill(); }
+}
+
+function recommend(){
+  const absE=edges.map(e=>Math.abs(e.ecorr)).filter(isFinite);
+  const lo=Math.min(...absE), hi=Math.max(...absE), steps=24;
+  let best=null;
+  for(let s=0;s<=steps;s++){
+    const t=lo+(hi-lo)*s/steps;
+    const deg={}; nodes.forEach(n=>deg[n.i]=0); const vis=new Set();
+    for(const e of edges){ if(!isFinite(e.ecorr)||Math.abs(e.ecorr)<t) continue;
+      if(filt.sign==="pos"&&e.ecorr<0)continue; if(filt.sign==="neg"&&e.ecorr>=0)continue;
+      deg[e.a]++;deg[e.b]++; }
+    nodes.forEach(n=>{ if(deg[n.i]>0) vis.add(n.i); });
+    const fit=scaleFreeFit(deg,[...vis]); if(!fit) continue;
+    const frac=fit.n/nodes.length;
+    if(frac<0.25) continue;                       // keep a meaningful fraction of the network
+    // Barabási-informed score: reward power-law fit, bonus for γ∈[2,3]
+    const score=fit.r2 + (fit.gamma>=2&&fit.gamma<=3?0.06:0);
+    if(!best||score>best.score) best={t,score,...fit,frac};
+  }
+  recBest=best;
+  const r=$("#rec");
+  if(!best){ r.textContent=""; $("#applyrec").style.display="none"; return; }
+  $("#applyrec").style.display="";
+  r.innerHTML=`Recommended min |ecorr| ≈ <b>${best.t.toFixed(3)}</b> `+
+    `(γ=${best.gamma.toFixed(2)}, R²=${best.r2.toFixed(3)}, keeps ${Math.round(best.frac*100)}% of nodes). `+
+    `<span class="hint">Maximises power-law fit of the degree distribution (Barabási / WGCNA scale-free criterion).</span>`;
+}
+
+// ---------- interaction ----------
+function toGraph(mx,my){ return {x:(mx-view.x)/view.k, y:(my-view.y)/view.k}; }
+function pick(mx,my){
+  const p=toGraph(mx,my); let best=-1,bd=1e9;
+  for(const n of nodes){ if(!VIS.visN.has(n.i))continue;
+    const d=Math.hypot(n.x-p.x,n.y-p.y), r=radiusOf(n.i)+3/view.k;
+    if(d<r&&d<bd){bd=d;best=n.i;} }
+  return best;
+}
+CV.addEventListener("pointermove",ev=>{
+  const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  if(dragging){ const p=toGraph(mx,my); dragging.x=p.x; dragging.y=p.y; render(); return; }
+  if(panning){ view.x=panning.vx+(ev.clientX-panning.px); view.y=panning.vy+(ev.clientY-panning.py); render(); return; }
+  const h=pick(mx,my);
+  if(h!==hot){ hot=h; render(); }
+  const tip=$("#tip");
+  if(h>=0){ const n=nodes[h]; tip.style.display="block";
+    tip.style.left=Math.min(mx+14,stageW()-260)+"px"; tip.style.top=(my+14)+"px";
+    tip.innerHTML=`<div class="t">${n.label||n.id}</div>`+
+      row("phylum",n.phylum)+row("family",n.family)+row("genus",n.genus)+
+      row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"");
+    inspect(h);
+  } else tip.style.display="none";
+});
+function row(k,v){ return v==null||v===""?"":`<div class="r"><span>${k}</span><b>${v}</b></div>`; }
+function inspect(i){
+  const n=nodes[i], box=$("#inspect");
+  box.innerHTML=`<h2>Node — ${n.id}</h2>`+
+    (n.label?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
+    row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
+    row2("degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
+    ["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0).map(k=>row2(k,"✓")).join("");
+}
+function row2(k,v){ return v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
+
+CV.addEventListener("pointerdown",ev=>{
+  const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  const h=pick(mx,my);
+  if(h>=0){ dragging=nodes[h]; }
+  else { panning={px:ev.clientX,py:ev.clientY,vx:view.x,vy:view.y}; CV.classList.add("drag"); }
+  CV.setPointerCapture(ev.pointerId);
+});
+addEventListener("pointerup",()=>{ dragging=null; panning=null; CV.classList.remove("drag"); });
+CV.addEventListener("wheel",ev=>{ ev.preventDefault();
+  const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  const f=Math.exp(-ev.deltaY*0.0015), nk=Math.max(0.15,Math.min(6,view.k*f));
+  view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; render();
+},{passive:false});
+
+// ---------- controls ----------
+function syncLabels(){
+  $("#ecv").textContent=(+$("#ec").value).toFixed(3);
+  $("#scv").textContent=(+$("#sc").value).toFixed(3);
+  $("#tnv").textContent=Math.round(filt.topN*edges.length);
+  $("#mdv").textContent=filt.md;
+}
+$("#ec").oninput=e=>{ filt.ec=+e.target.value; syncLabels(); apply(); };
+$("#sc").oninput=e=>{ filt.sc=+e.target.value; syncLabels(); apply(); };
+$("#tn").oninput=e=>{ filt.topN=+e.target.value/edges.length; syncLabels(); apply(); };
+$("#md").oninput=e=>{ filt.md=+e.target.value; syncLabels(); apply(); };
+$("#sign").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  $("#sign").querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); filt.sign=b.dataset.v; apply();
+});
+$("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); };
+$("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
+  ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); };
+$("#relayout").onclick=()=>{ seedLayout(); relax(300); render(); };
+$("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>{ try{ resize(); load(JSON.parse(rd.result)); }
+    catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };
+addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
+
+resize();
+if(location.protocol.startsWith("http")){
+  fetch("scapis.graph.json").then(r=>r.ok?r.json():Promise.reject())
+    .then(g=>{ resize(); load(g); })
+    .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”. The SCAPIS demo (<code>scapis.graph.json</code>) is client data and is not bundled in the repo.</span>'; });
+} else {
+  $("#badge").innerHTML='<b>Open over http to auto-load a bundled graph.</b><br><span class="m">e.g. <code>cd web &amp;&amp; python3 -m http.server</code>, or use “Load graph.json”.</span>';
+}
+</script>
+</body>
+</html>
