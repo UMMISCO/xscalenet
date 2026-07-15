@@ -122,6 +122,12 @@
         <select id="sizeby" style="margin-top:5px"></select></div>
     </div>
 
+    <div class="sec" id="layersec" style="display:none">
+      <h2>Taxonomic layer</h2>
+      <select id="layer"></select>
+      <div class="hint" id="layernote" style="margin-top:7px">Collapse species into a higher taxonomic rank — each node is a taxon at its members’ layout centroid; edges are between-taxa links.</div>
+    </div>
+
     <div class="sec" id="propsec" style="display:none">
       <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
@@ -176,6 +182,9 @@ let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
 let sizeBy="degree", sizeMax={};
 // ATC propagation trace (present when the graph was enriched with graph_atc)
 let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
+// taxonomic-layer aggregation: the full species-level graph + current rank
+let baseGraph=null, layerRank="species";
+const RANKS=["species","genus","family","order","class","phylum"];
 
 // Canvas cannot use CSS var() strings — resolve theme colours to hex once.
 let COL={};
@@ -184,6 +193,47 @@ function readColors(){
   COL={neg:get('--neg','#e5534b'), pos:get('--pos','#8b98a6'), line:get('--line','#e3e7ec'),
     panel:get('--panel','#ffffff'), accent:get('--accent','#2f6df6'), ink:get('--ink','#1a1f26'),
     muted:get('--muted','#6b7480'), bg:get('--bg','#f6f7f9')};
+}
+
+// ---------- taxonomic layer aggregation ----------
+function loadBase(g){
+  baseGraph=g;
+  const q=new URLSearchParams(location.search);
+  layerRank = (q.get("layer") && RANKS.includes(q.get("layer"))) ? q.get("layer") : "species";
+  const present=RANKS.filter(r=> r==="species" || (g.nodes||[]).some(n=>n[r]));
+  $("#layer").innerHTML=present.map(r=>`<option value="${r}">${r==="species"?"species (full)":r}</option>`).join("");
+  $("#layer").value = present.includes(layerRank) ? layerRank : (layerRank="species");
+  $("#layersec").style.display = present.length>1 ? "" : "none";
+  load(layerRank==="species" ? g : aggregate(g, layerRank));
+}
+function applyLayer(){ load(layerRank==="species" ? baseGraph : aggregate(baseGraph, layerRank)); }
+// Collapse the species graph to `rank`: one node per taxon at its members'
+// layout centroid; edges are between-taxa links (weight = #species-edges,
+// ecorr = mean). Colours/positions stay consistent with the full network.
+function aggregate(g, rank){
+  const idOf={}; g.nodes.forEach((n,i)=>idOf[n.id]=i);
+  const taxonOf=n=>{ const v=n[rank]; return (v&&v!=="NA"&&v!=="")?v:"Unclassified"; };
+  const members={};
+  g.nodes.forEach(n=>{ const t=taxonOf(n); (members[t]=members[t]||[]).push(n); });
+  const nodes=Object.entries(members).map(([t,ms])=>{
+    let sx=0,sy=0,c=0; ms.forEach(m=>{ if(Number.isFinite(+m.x)){sx+=+m.x;sy+=+m.y;c++;} });
+    const pc={}; ms.forEach(m=>{const p=m.phylum_group||m.phylum||"NA"; pc[p]=(pc[p]||0)+1;});
+    const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0];
+    return { id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t,
+             members:ms.length, x:c?sx/c:0, y:c?sy/c:0 };
+  });
+  const eagg={};
+  for(const e of g.edges){
+    const na=g.nodes[idOf[e.source]], nb=g.nodes[idOf[e.target]]; if(!na||!nb) continue;
+    const ta=taxonOf(na), tb=taxonOf(nb); if(ta===tb) continue;   // drop within-taxon edges
+    const key=ta<tb?ta+""+tb:tb+""+ta;
+    const o=eagg[key]||(eagg[key]={s:ta,t:tb,n:0,sum:0}); o.n++; o.sum+=(+e.ecorr||0);
+  }
+  const edges=Object.values(eagg).map(o=>({source:o.s,target:o.t,ecorr:o.sum/o.n,weight:o.n,score:1}));
+  return { meta:{ title:`${g.meta?.title||"network"} — ${rank} layer`,
+      source:`${nodes.length} ${rank}-level taxa · edge = between-taxa links (width ∝ #species-edges)`,
+      directed:false, color_by:"phylum_group" },
+    color_groups:g.color_groups, color_map:g.color_map, nodes, edges };
 }
 
 // ---------- load ----------
@@ -206,13 +256,15 @@ function load(g){
   $("#colorby").value=colorField;
 
   // size-by options: degree always; ATC variants when present
-  const hasAtc=nodes.some(n=>n.atc!=null);
+  const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null);
   const sizeOpts=[["degree","degree"]];
+  if(hasMembers) sizeOpts.push(["members","taxon size (# species)"]);
   if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
   $("#sizeby").innerHTML=sizeOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
-  sizeBy="degree"; $("#sizeby").value="degree";
+  sizeBy=hasMembers?"members":"degree"; $("#sizeby").value=sizeBy;
   sizeMax={ atc:Math.max(1e-9,...nodes.map(n=>+n.atc||0)),
-            atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)) };
+            atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)),
+            members:Math.max(1e-9,...nodes.map(n=>+n.members||0)) };
 
   // ATC propagation trace (from graph_atc enrichment)
   trace=g.atc_trace?.steps||[];
@@ -392,12 +444,12 @@ function render(){
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
   const nbr = hot>=0 ? neighbors(hot) : null;
   // edges
-  CTX.lineWidth=0.8/view.k;
   for(const e of VIS.edges){
     const a=nodes[e.a],b=nodes[e.b];
     const on = !nbr || nbr.has(e.a)||nbr.has(e.b);
     CTX.globalAlpha = on?(nbr?0.85:0.5):0.06;
     CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
+    CTX.lineWidth = (e.weight ? Math.min(5, 0.6+e.weight*0.5) : 0.8)/view.k; // width ∝ #edges (layer mode)
     CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke();
   }
   CTX.globalAlpha=1;
@@ -522,10 +574,11 @@ CV.addEventListener("pointermove",ev=>{
 function row(k,v){ return v==null||v===""?"":`<div class="r"><span>${k}</span><b>${v}</b></div>`; }
 function inspect(i){
   const n=nodes[i], box=$("#inspect");
-  box.innerHTML=`<h2>Node — ${n.id}</h2>`+
-    (n.label?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
+  box.innerHTML=`<h2>${n.members!=null?"Taxon":"Node"} — ${n.id}</h2>`+
+    (n.label&&n.members==null?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
+    (n.members!=null?row2("species (members)",n.members):"")+
     row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
-    row2("degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
+    row2(n.members!=null?"between-taxa degree":"degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
     (n.atc!=null?row2("ATC (dist·coin)",(+n.atc).toFixed(4)):"")+
     (n.atc_last!=null?row2("ATC (last config)",(+n.atc_last).toFixed(4)):"")+
     (prop.step!=null?row2(`theme mix @step ${prop.step}`, themeMix(i)):"")+
@@ -571,6 +624,7 @@ $("#sign").querySelectorAll("button").forEach(b=>b.onclick=()=>{
 });
 $("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); };
 $("#sizeby").onchange=e=>{ sizeBy=e.target.value; render(); };
+$("#layer").onchange=e=>{ layerRank=e.target.value; applyLayer(); };
 $("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
   ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); };
 
@@ -605,14 +659,14 @@ $("#relayout").onclick=()=>{
   render();
 };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
-  const rd=new FileReader(); rd.onload=()=>{ try{ resize(); load(JSON.parse(rd.result)); }
-    catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };
+  const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
+    catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
 addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
 
 resize();
 if(location.protocol.startsWith("http")){
   fetch("scapis.graph.json").then(r=>r.ok?r.json():Promise.reject())
-    .then(g=>{ resize(); load(g); })
+    .then(g=>{ resize(); loadBase(g); })
     .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”. The SCAPIS demo (<code>scapis.graph.json</code>) is client data and is not bundled in the repo.</span>'; });
 } else {
   $("#badge").innerHTML='<b>Open over http to auto-load a bundled graph.</b><br><span class="m">e.g. <code>cd web &amp;&amp; python3 -m http.server</code>, or use “Load graph.json”.</span>';

@@ -41,8 +41,13 @@ graphs:
   against the scale-free criteria (Barabási's 2 ≤ γ ≤ 3; WGCNA's R² ≥ 0.80), and
   **recommends a min-|ecorr| threshold** that maximises the power-law fit while
   keeping a meaningful fraction of nodes. One click applies it.
-- **Size by** degree or ATC (dist·co-inertia / last-config), when the graph
-  carries ATC.
+- **Taxonomic layers** — collapse the species network to any rank (genus →
+  phylum): each node becomes a taxon at its members' layout centroid, sized by
+  number of species, with between-taxa edges (width ∝ number of species-edges).
+- **Layout** — if nodes carry `x`/`y` (e.g. exported from the R igraph object's
+  layout matrix), those fixed coordinates are used; otherwise a force layout.
+- **Size by** degree, taxon size, or ATC (dist·co-inertia / last-config), when
+  available.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a
   play/scrub timeline animates the annotation propagation *on the real network*:
   each node's colour blends its evolving theme mix `Tᵖ`, with the per-step
