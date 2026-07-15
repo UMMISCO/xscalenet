@@ -46,6 +46,9 @@ graphs:
   number of species, with between-taxa edges (width ∝ number of species-edges).
 - **Layout** — if nodes carry `x`/`y` (e.g. exported from the R igraph object's
   layout matrix), those fixed coordinates are used; otherwise a force layout.
+  **Re-layout filtered** force-lays-out just the currently visible (filtered)
+  subgraph; **Reset** restores the original layout. (`?relayout=1` re-lays a
+  shared filtered view on load.)
 - **Size by** degree, taxon size, or ATC (dist·co-inertia / last-config), when
   available.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a

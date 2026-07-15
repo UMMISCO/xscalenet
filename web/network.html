@@ -99,7 +99,8 @@
   <div class="grow"></div>
   <a class="btn" href="index.html">◐ Propagation player</a>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
-  <button class="btn" id="relayout">Re-layout</button>
+  <button class="btn" id="relayout" title="Force-layout the currently visible (filtered) nodes">Re-layout filtered</button>
+  <button class="btn" id="resetlayout" title="Restore the original layout">Reset</button>
 </header>
 
 <div id="app">
@@ -310,6 +311,7 @@ function load(g){
   if(q.get("ec")!=null){ const ec=$("#ec"); ec.value=q.get("ec"); filt.ec=+ec.value; }
   if(q.get("sizeby")){ sizeBy=q.get("sizeby"); $("#sizeby").value=sizeBy; }
   syncLabels(); apply();
+  if(q.get("relayout")){ const ns=nodes.filter(n=>VIS.visN.has(n.i)); if(ns.length){ relax(320, ns, VIS.edges); render(); } }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
@@ -400,29 +402,33 @@ function seedLayout(){
   nodes.forEach((n,k)=>{const a=2*Math.PI*k/nodes.length;
     n.x=cx+Math.cos(a)*R*(0.5+0.5*Math.random()); n.y=cy+Math.sin(a)*R*(0.5+0.5*Math.random());});
 }
-function relax(iter){
+// Force-directed relaxation over `ns` nodes using `es` edges (defaults: whole
+// graph). Passing the visible subset re-lays-out just the filtered network.
+function relax(iter, ns, es){
+  ns=ns||nodes; es=es||edges;
+  if(!ns.length) return;
   const W=stageW(),H=stageH();
-  const k=Math.sqrt(W*H/Math.max(1,nodes.length))*0.62;
-  // use ALL edges for a stable full-graph layout (filtering only hides)
+  const k=Math.sqrt(W*H/Math.max(1,ns.length))*0.62;
   for(let t=0;t<iter;t++){
     const cool=1-t/iter;
-    for(const n of nodes){n.vx*=0.9;n.vy*=0.9;}
+    for(const n of ns){n.vx*=0.9;n.vy*=0.9;}
     // Barnes-hut would be nicer; O(n²) is fine at n≈500
-    for(let i=0;i<nodes.length;i++){const a=nodes[i];
-      for(let j=i+1;j<nodes.length;j++){const b=nodes[j];
+    for(let i=0;i<ns.length;i++){const a=ns[i];
+      for(let j=i+1;j<ns.length;j++){const b=ns[j];
         let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
         const f=k*k/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
-    for(const e of edges){const a=nodes[e.a],b=nodes[e.b];
+    for(const e of es){const a=nodes[e.a],b=nodes[e.b];
       let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.06;
       a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
     const cx=W/2,cy=H/2;
-    for(const n of nodes){n.vx+=(cx-n.x)*0.004;n.vy+=(cy-n.y)*0.004;
+    for(const n of ns){n.vx+=(cx-n.x)*0.004;n.vy+=(cy-n.y)*0.004;
       n.x+=Math.max(-30,Math.min(30,n.vx))*cool; n.y+=Math.max(-30,Math.min(30,n.vy))*cool;}
   }
-  fitView();
+  fitView(ns);
 }
-function fitView(){
-  const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
+function fitView(ns){
+  ns=ns||nodes;
+  const xs=ns.map(n=>n.x),ys=ns.map(n=>n.y);
   const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
   const W=stageW(),H=stageH(),pad=50;
   const k=Math.min((W-2*pad)/Math.max(1e-6,maxx-minx),(H-2*pad)/Math.max(1e-6,maxy-miny),60);
@@ -679,9 +685,16 @@ function tickProp(){ if(!prop.playing) return;
   if(prop.step>=trace.length-1) setProp(0); else setProp(prop.step+1);
   prop.timer=setTimeout(tickProp, 700);
 }
+// Re-layout only the visible (filtered) subgraph, relaxing from current positions.
 $("#relayout").onclick=()=>{
+  const ns=nodes.filter(n=>VIS.visN.has(n.i));
+  if(!ns.length) return;
+  relax(320, ns, VIS.edges); render();
+};
+// Reset to the original layout (igraph coordinates if present, else a fresh force layout of the whole graph).
+$("#resetlayout").onclick=()=>{
   if(hasFixedLayout){ nodes.forEach(n=>{ n.x=+G.nodes[n.i].x; n.y=-G.nodes[n.i].y; }); fitView(); }
-  else { seedLayout(); relax(300); }
+  else { seedLayout(); relax(300, nodes, edges); }
   render();
 };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
