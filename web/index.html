@@ -1,0 +1,479 @@
+<!doctype html>
+<!--
+  xscalenet — ATC propagation player.
+
+  The real web app (not the throwaway viewer.html): loads a graph.json that
+  carries an `atc_trace` and animates the annotation-propagation dynamics
+  (Prifti et al. 2010) step by step. Nodes are pie charts of theme weights Tᵖ;
+  the timeline scrubs through the propagation; the co-inertia curve shows
+  convergence; ATC bars rank nodes by centrality.
+
+  Self-contained, dependency-free. Open over http (python3 -m http.server) so it
+  can fetch the bundled example, or use "Load graph.json".
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xscalenet · ATC propagation</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1a1f26; --muted:#6b7480;
+    --line:#e3e7ec; --line2:#eef1f4; --accent:#2f6df6; --accentsoft:#e8f0fe;
+    --canvas:#ffffff; --neg:#e5534b; --pos:#8b98a6;
+    --shadow:0 1px 2px rgba(20,30,50,.06),0 4px 16px rgba(20,30,50,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1216; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e;
+      --line:#262c34; --line2:#20252c; --accent:#4d8bff; --accentsoft:#16243d;
+      --canvas:#0d1015; --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  header{display:flex;align-items:center;gap:16px;padding:12px 18px;
+    background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header .brand{display:flex;flex-direction:column;line-height:1.2}
+  header .brand b{font-size:15px;font-weight:650;letter-spacing:-.01em}
+  header .brand span{font-size:11.5px;color:var(--muted)}
+  header .grow{flex:1}
+  .legend{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .legend .li{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  .legend .sw{width:12px;height:12px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+  .btn{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:6px 11px;cursor:pointer;font-size:12.5px;font-weight:500;
+    display:inline-flex;align-items:center;gap:6px;transition:.12s}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.06);color:#fff}
+  input[type=file]{display:none}
+
+  #app{display:grid;grid-template-columns:1fr 340px;grid-template-rows:1fr auto;
+    height:calc(100vh - 58px);min-height:0}
+  #stage{position:relative;grid-row:1;grid-column:1;min-height:0;
+    background:radial-gradient(120% 120% at 50% 30%, var(--canvas), var(--bg))}
+  #net{width:100%;height:100%;display:block;cursor:grab}
+  #net.drag{cursor:grabbing}
+  .badge{position:absolute;top:14px;left:16px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;box-shadow:var(--shadow);font-size:12px;max-width:60%}
+  .badge b{font-weight:650}
+  .badge .m{color:var(--muted)}
+
+  aside{grid-row:1/3;grid-column:2;background:var(--panel);border-left:1px solid var(--line);
+    overflow:auto;padding:0}
+  .sec{padding:15px 16px;border-bottom:1px solid var(--line2)}
+  .sec h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
+  .kv .k{color:var(--muted)}
+  .kv b{font-variant-numeric:tabular-nums;font-weight:600}
+
+  /* convergence curve */
+  #conv{width:100%;height:96px;display:block}
+  .convnote{font-size:11.5px;color:var(--muted);margin-top:6px}
+  .convnote b{color:var(--ink)}
+
+  /* atc bars */
+  .bars{display:flex;flex-direction:column;gap:5px;margin-top:2px}
+  .bar{display:grid;grid-template-columns:34px 1fr 52px;align-items:center;gap:8px;cursor:pointer}
+  .bar .lab{color:var(--muted);font-variant-numeric:tabular-nums}
+  .bar .track{height:9px;background:var(--line2);border-radius:5px;overflow:hidden}
+  .bar .fill{height:100%;background:var(--accent);border-radius:5px}
+  .bar .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .bar.hot .lab,.bar.hot .val{color:var(--accent);font-weight:650}
+
+  /* node inspector */
+  #inspect .empty{color:var(--muted)}
+  .pierow{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  .pierow svg{flex:none}
+  .themebar{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+  .tb{display:grid;grid-template-columns:52px 1fr 46px;align-items:center;gap:8px;font-size:12px}
+  .tb .tt{color:var(--muted)}
+  .tb .track{height:7px;border-radius:4px;background:var(--line2);overflow:hidden}
+  .tb .fill{height:100%;border-radius:4px}
+  .tb .vv{text-align:right;font-variant-numeric:tabular-nums}
+
+  /* transport / timeline */
+  #transport{grid-row:2;grid-column:1;background:var(--panel);border-top:1px solid var(--line);
+    padding:12px 18px;display:flex;flex-direction:column;gap:9px}
+  .trow{display:flex;align-items:center;gap:12px}
+  .trow .step{font-variant-numeric:tabular-nums;font-weight:600;min-width:120px}
+  .trow .step .m{color:var(--muted);font-weight:400}
+  #scrub{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:4px;
+    background:var(--line);outline:none;cursor:pointer}
+  #scrub::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--accent);border:2px solid var(--panel);box-shadow:0 1px 3px rgba(0,0,0,.25);cursor:grab}
+  #scrub::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);
+    border:2px solid var(--panel);cursor:grab}
+  .ticks{display:flex;gap:0;height:16px;align-items:flex-end}
+  .conv-flag{font-size:11.5px;color:var(--muted)}
+  .conv-flag b{color:var(--accent)}
+  .speed{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+  select{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit}
+  .hint{color:var(--muted);font-size:12px}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>xscalenet</b><span>ATC propagation player</span></div>
+  <div class="legend" id="legend"></div>
+  <div class="grow"></div>
+  <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
+  <button class="btn" id="relayout">Re-layout</button>
+</header>
+
+<div id="app">
+  <div id="stage">
+    <svg id="net"></svg>
+    <div class="badge" id="badge"></div>
+  </div>
+
+  <aside>
+    <div class="sec">
+      <h2>Network</h2>
+      <div id="netstats"></div>
+    </div>
+    <div class="sec">
+      <h2>Convergence — co-inertia (RV)</h2>
+      <svg id="conv" viewBox="0 0 300 96" preserveAspectRatio="none"></svg>
+      <div class="convnote" id="convnote"></div>
+    </div>
+    <div class="sec">
+      <h2>ATC score (dist·co-inertia)</h2>
+      <div class="bars" id="bars"></div>
+    </div>
+    <div class="sec" id="inspect">
+      <h2>Node — weights at this step</h2>
+      <div class="empty">Hover or click a node.</div>
+    </div>
+  </aside>
+
+  <div id="transport">
+    <div class="trow">
+      <button class="btn primary" id="play">▶ Play</button>
+      <button class="btn" id="stepb">‹</button>
+      <button class="btn" id="stepf">›</button>
+      <div class="step"><span id="steplab">step 0</span> <span class="m" id="stepof"></span></div>
+      <input type="range" id="scrub" min="0" max="0" value="0" step="1">
+      <div class="speed">speed
+        <select id="speed">
+          <option value="900">0.5×</option>
+          <option value="550" selected>1×</option>
+          <option value="300">2×</option>
+          <option value="140">4×</option>
+        </select>
+      </div>
+    </div>
+    <div class="trow">
+      <div class="ticks" id="ticks"></div>
+      <div class="grow" style="flex:1"></div>
+      <div class="conv-flag" id="convflag"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const NET = $("#net"), SVGNS = "http://www.w3.org/2000/svg";
+
+let G=null, nodes=[], edges=[], idx={}, themes=[], colors=[], trace=[];
+let step=0, playing=false, timer=null, hot=null;
+let view={x:0,y:0,k:1}, dragging=null, panning=null;
+
+// ---- palette fallback if a graph omits theme_colors -------------------------
+const FALLBACK = ["#9c6b3f","#2b2b2b","#e3b341","#2f6df6","#3fb950","#db61a2","#39c5cf","#db6d28"];
+
+function load(g){
+  G=g;
+  themes = g.themes || (g.atc_trace?.steps?.[0]?.config?.[0]||[]).map((_,i)=>"theme "+i);
+  colors = (g.theme_colors && g.theme_colors.length===themes.length) ? g.theme_colors
+            : themes.map((_,i)=>FALLBACK[i%FALLBACK.length]);
+  nodes = (g.nodes||[]).map((n,i)=>({...n, i, x:0,y:0,vx:0,vy:0}));
+  idx={}; nodes.forEach((n,i)=>idx[n.id]=i);
+  edges = (g.edges||[]).map(e=>({a:idx[e.source], b:idx[e.target]})).filter(e=>e.a!=null&&e.b!=null);
+  trace = g.atc_trace?.steps || [];
+  step=0; hot=null;
+  buildLegend(); buildBars(); buildTicks(); netStats();
+  seedLayout(); relax(240);
+  $("#scrub").max = Math.max(0, trace.length-1);
+  const b=$("#badge");
+  if(G.meta?.title){ b.style.display=""; b.innerHTML=`<b>${G.meta.title}</b>`+
+    (trace.length?` <span class="m">· ${trace.length-1} propagation steps</span>`:""); }
+  else b.style.display="none";
+  render(); drawConv(); inspect(null);
+}
+
+// ---- layout: force sim, then freeze ----------------------------------------
+function seedLayout(){
+  const W=stageW(), H=stageH(), cx=W/2, cy=H/2;
+  // isolated nodes (degree 0) parked along the top; others seeded on a circle
+  const iso = nodes.filter(n=>deg(n.i)===0), con = nodes.filter(n=>deg(n.i)>0);
+  con.forEach((n,k)=>{const a=2*Math.PI*k/Math.max(1,con.length);
+    n.x=cx+Math.cos(a)*Math.min(W,H)*0.26; n.y=cy+Math.sin(a)*Math.min(W,H)*0.26;});
+  iso.forEach((n,k)=>{n.x=cx+(k-(iso.length-1)/2)*70; n.y=cy-Math.min(W,H)*0.40;});
+}
+function deg(i){return edges.reduce((s,e)=>s+(e.a===i||e.b===i?1:0),0);}
+function relax(iter){
+  const W=stageW(), H=stageH(), k=Math.sqrt(W*H/Math.max(1,nodes.length))*0.42;
+  for(let t=0;t<iter;t++){
+    for(const n of nodes){n.vx*=0.86;n.vy*=0.86;}
+    for(let i=0;i<nodes.length;i++)for(let j=i+1;j<nodes.length;j++){
+      const a=nodes[i],b=nodes[j];let dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy)||1;
+      const f=k*k/(d*d)*3.2; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
+    for(const e of edges){const a=nodes[e.a],b=nodes[e.b];
+      let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.055;
+      a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
+    const cx=W/2,cy=H/2;
+    for(const n of nodes){n.vx+=(cx-n.x)*0.006;n.vy+=(cy-n.y)*0.006;
+      n.x+=Math.max(-12,Math.min(12,n.vx));n.y+=Math.max(-12,Math.min(12,n.vy));}
+  }
+  fitView();
+}
+function fitView(){
+  const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  const W=stageW(),H=stageH(),pad=70;
+  const k=Math.min((W-2*pad)/Math.max(1,maxx-minx),(H-2*pad)/Math.max(1,maxy-miny),1.6);
+  view.k=isFinite(k)&&k>0?k:1;
+  view.x=W/2-((minx+maxx)/2)*view.k;
+  view.y=H/2-((miny+maxy)/2)*view.k;
+}
+function stageW(){return $("#stage").clientWidth||900;}
+function stageH(){return $("#stage").clientHeight||600;}
+
+// ---- node mass / pie geometry ----------------------------------------------
+function rowAt(s,i){ return (trace[s]?.config?.[i]) || themes.map(()=>0); }
+function mass(row){ return row.reduce((a,b)=>a+b,0); }
+// radius scales with node mass (theme weight it holds at this step)
+function radiusOf(row){
+  const m=mass(row);
+  const mx=maxMass(); // step-local max for stable relative sizing
+  const r=10+22*Math.sqrt(mx>0?m/mx:0);
+  return {r, empty:m<=1e-9};
+}
+let _maxMassCache={};
+function maxMass(){
+  if(_maxMassCache[step]!=null) return _maxMassCache[step];
+  let mx=0; for(let i=0;i<nodes.length;i++) mx=Math.max(mx,mass(rowAt(step,i)));
+  return (_maxMassCache[step]=mx);
+}
+
+// ---- render -----------------------------------------------------------------
+function render(){
+  _maxMassCache={};
+  while(NET.firstChild) NET.removeChild(NET.firstChild);
+  const g=el("g",{transform:`translate(${view.x},${view.y}) scale(${view.k})`});
+  NET.appendChild(g);
+
+  // edges
+  for(const e of edges){
+    const a=nodes[e.a], b=nodes[e.b];
+    g.appendChild(el("line",{x1:a.x,y1:a.y,x2:b.x,y2:b.y,
+      stroke:"var(--line)","stroke-width":1.6/view.k*view.k,"stroke-linecap":"round",opacity:0.9}));
+  }
+  // nodes as pies
+  for(const n of nodes){
+    const row=rowAt(step,n.i), {r,empty}=radiusOf(row);
+    const grp=el("g",{transform:`translate(${n.x},${n.y})`, class:"node", "data-i":n.i,
+      style:"cursor:pointer"});
+    if(hot===n.i) grp.appendChild(el("circle",{r:r+5,fill:"none",stroke:"var(--accent)","stroke-width":2}));
+    if(empty){
+      grp.appendChild(el("circle",{r:11,fill:"var(--panel)",stroke:"var(--line)",
+        "stroke-width":1.5,"stroke-dasharray":"3 3"}));
+    } else {
+      appendPie(grp, row, r);
+      grp.appendChild(el("circle",{r,fill:"none",stroke:"var(--panel)","stroke-width":1.5}));
+    }
+    const t=el("text",{y:r+13,"text-anchor":"middle","font-size":11,fill:"var(--muted)",
+      style:"pointer-events:none;font-weight:600"}); t.textContent=n.id; grp.appendChild(t);
+    grp.addEventListener("pointerenter",()=>{hot=n.i; softHi(); inspect(n.i);});
+    grp.addEventListener("pointerdown",ev=>startDragNode(ev,n));
+    g.appendChild(grp);
+  }
+}
+function appendPie(grp,row,r){
+  const tot=mass(row); let ang=-Math.PI/2;
+  const present=row.map((v,j)=>({v,j})).filter(o=>o.v>1e-12);
+  if(present.length===1){ // single theme → full disc (avoids degenerate arc)
+    grp.appendChild(el("circle",{r,fill:colors[present[0].j]})); return;
+  }
+  for(const {v,j} of present){
+    const a2=ang+2*Math.PI*(v/tot);
+    const x1=Math.cos(ang)*r,y1=Math.sin(ang)*r,x2=Math.cos(a2)*r,y2=Math.sin(a2)*r;
+    const large=(a2-ang)>Math.PI?1:0;
+    grp.appendChild(el("path",{d:`M0 0 L${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`,
+      fill:colors[j]}));
+    ang=a2;
+  }
+}
+function softHi(){
+  document.querySelectorAll(".bar").forEach(b=>b.classList.toggle("hot", +b.dataset.i===hot));
+  render();
+}
+function el(t,attrs){const e=document.createElementNS(SVGNS,t);
+  for(const k in attrs) e.setAttribute(k,attrs[k]); return e;}
+
+// ---- sidebar panels ---------------------------------------------------------
+function buildLegend(){
+  $("#legend").innerHTML = themes.map((t,i)=>
+    `<span class="li"><span class="sw" style="background:${colors[i]}"></span>${t}</span>`).join("");
+}
+function netStats(){
+  const m=G.meta||{};
+  $("#netstats").innerHTML =
+    kv("nodes",nodes.length)+kv("edges",edges.length)+kv("themes",themes.length)+
+    kv("propagation steps", trace.length? trace.length-1 : "—")+
+    (m.converged_at? kv("converged at","step "+m.converged_at):"")+
+    (m.source? `<div class="kv"><span class="k">source</span><b style="font-weight:500;font-size:11.5px">${m.source}</b></div>`:"");
+}
+function kv(k,v){return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`;}
+
+function buildBars(){
+  const at = nodes.map(n=>({id:n.id,i:n.i,v:+n.atc||0}));
+  const mx=Math.max(1e-9,...at.map(o=>o.v));
+  at.sort((a,b)=>b.v-a.v);
+  $("#bars").innerHTML = at.map(o=>
+    `<div class="bar" data-i="${o.i}"><span class="lab">${o.id}</span>
+      <span class="track"><span class="fill" style="width:${(100*o.v/mx).toFixed(1)}%"></span></span>
+      <span class="val">${o.v.toFixed(4)}</span></div>`).join("");
+  $("#bars").querySelectorAll(".bar").forEach(b=>{
+    b.addEventListener("pointerenter",()=>{hot=+b.dataset.i; softHi(); inspect(hot);});
+  });
+}
+
+function inspect(i){
+  const box=$("#inspect");
+  if(i==null){ box.innerHTML='<h2>Node — weights at this step</h2><div class="empty">Hover or click a node.</div>'; return; }
+  const n=nodes[i], row=rowAt(step,i), tot=mass(row);
+  const pie=document.createElementNS(SVGNS,"svg"); pie.setAttribute("width",56); pie.setAttribute("height",56);
+  pie.setAttribute("viewBox","-28 -28 56 56");
+  const g=el("g",{}); if(tot>1e-9) appendPie(g,row,24); else g.appendChild(el("circle",{r:22,fill:"none",stroke:"var(--line)","stroke-width":1.5,"stroke-dasharray":"3 3"}));
+  pie.appendChild(g);
+  const bars = themes.map((t,j)=>{
+    const share=tot>0?row[j]/tot:0;
+    return `<div class="tb"><span class="tt">${t}</span>
+      <span class="track"><span class="fill" style="width:${(100*share).toFixed(1)}%;background:${colors[j]}"></span></span>
+      <span class="vv">${(row[j]).toFixed(3)}</span></div>`;
+  }).join("");
+  box.innerHTML = `<h2>Node ${n.id} — weights at step ${step}</h2>`+
+    `<div class="pierow"></div><div class="themebar">${bars}</div>`+
+    `<div style="margin-top:10px">${kv("mass (Σ weights)",tot.toFixed(4))}
+      ${kv("degree", n.degree??deg(i))}
+      ${n.betweenness!=null?kv("betweenness",(+n.betweenness).toFixed(4)):""}
+      ${kv("ATC", (+n.atc||0).toFixed(4))}
+      ${n.atc_last!=null?kv("ATC (last config)",(+n.atc_last).toFixed(4)):""}</div>`;
+  box.querySelector(".pierow").appendChild(pie);
+}
+
+// ---- convergence curve ------------------------------------------------------
+function drawConv(){
+  const svg=$("#conv"); while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const W=300,H=96,pad=6, coins=trace.map(s=>s.coinertia).map(v=>v==null?null:v);
+  const pts=[]; for(let s=1;s<trace.length;s++){ if(coins[s]==null)continue;
+    const x=pad+(W-2*pad)*(s-1)/Math.max(1,trace.length-2);
+    const y=H-pad-(H-2*pad)*coins[s]; pts.push({s,x,y,v:coins[s]});}
+  // threshold line at 0.9
+  const yThr=H-pad-(H-2*pad)*0.9;
+  svg.appendChild(el("line",{x1:pad,y1:yThr,x2:W-pad,y2:yThr,stroke:"var(--line)","stroke-width":1,"stroke-dasharray":"3 3"}));
+  const thrT=el("text",{x:W-pad,y:yThr-3,"text-anchor":"end","font-size":9,fill:"var(--muted)"});
+  thrT.textContent="RV 0.9"; svg.appendChild(thrT);
+  if(pts.length){
+    let d="M"+pts.map(p=>`${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" L");
+    svg.appendChild(el("path",{d,fill:"none",stroke:"var(--accent)","stroke-width":2,"stroke-linejoin":"round"}));
+    for(const p of pts){
+      const on = p.s===step;
+      svg.appendChild(el("circle",{cx:p.x,cy:p.y,r:on?4:2.4,
+        fill:on?"var(--accent)":"var(--panel)",stroke:"var(--accent)","stroke-width":1.6}));
+    }
+  }
+  // current-step marker
+  const cur=pts.find(p=>p.s===step);
+  const note=$("#convnote");
+  if(step===0) note.innerHTML='Step 0 — initial configuration <b>T⁰</b> (column-normalized annotations).';
+  else if(cur) note.innerHTML=`Step ${step}: co-inertia <b>RV = ${cur.v.toFixed(4)}</b>${cur.v>=0.9?' — converged':''}.`;
+  else note.textContent='';
+}
+
+// ---- transport --------------------------------------------------------------
+function setStep(s){
+  step=Math.max(0,Math.min(trace.length-1,s));
+  $("#scrub").value=step; $("#steplab").textContent="step "+step;
+  $("#stepof").textContent="/ "+(trace.length-1);
+  render(); drawConv(); if(hot!=null) inspect(hot);
+  const flag=$("#convflag"), ca=G.meta?.converged_at;
+  flag.innerHTML = ca? (step>=ca? `converged (RV≥0.9 at step <b>${ca}</b>)` : `converges at step <b>${ca}</b>`) : "";
+}
+function buildTicks(){
+  const t=$("#ticks"); t.innerHTML="";
+  const ca=G.meta?.converged_at;
+  for(let s=0;s<trace.length;s++){
+    const d=document.createElement("div");
+    d.style.cssText=`width:6px;height:${s===0?12:8}px;border-radius:2px;margin-right:2px;
+      background:${ca&&s===ca?'var(--accent)':'var(--line)'}`;
+    d.title="step "+s; t.appendChild(d);
+  }
+}
+function play(){ playing=!playing; $("#play").textContent=playing?"❚❚ Pause":"▶ Play";
+  if(playing) tick(); else clearTimeout(timer); }
+function tick(){
+  if(!playing) return;
+  if(step>=trace.length-1){ setStep(0); }
+  else setStep(step+1);
+  timer=setTimeout(tick, +$("#speed").value);
+}
+
+// ---- pan / zoom / drag ------------------------------------------------------
+function startDragNode(ev,n){
+  ev.stopPropagation(); dragging={n,px:ev.clientX,py:ev.clientY};
+  NET.setPointerCapture(ev.pointerId);
+}
+NET.addEventListener("pointerdown",ev=>{
+  if(dragging) return;
+  panning={px:ev.clientX,py:ev.clientY,x:view.x,y:view.y}; NET.classList.add("drag");
+});
+NET.addEventListener("pointermove",ev=>{
+  if(dragging){ const dx=(ev.clientX-dragging.px)/view.k, dy=(ev.clientY-dragging.py)/view.k;
+    dragging.n.x+=dx; dragging.n.y+=dy; dragging.px=ev.clientX; dragging.py=ev.clientY; render(); }
+  else if(panning){ view.x=panning.x+(ev.clientX-panning.px); view.y=panning.y+(ev.clientY-panning.py); render(); }
+});
+addEventListener("pointerup",()=>{ dragging=null; panning=null; NET.classList.remove("drag"); });
+NET.addEventListener("pointerleave",()=>{ if(!dragging){hot=null; softHi();} });
+NET.addEventListener("wheel",ev=>{ ev.preventDefault();
+  const r=NET.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  const f=Math.exp(-ev.deltaY*0.0015), nk=Math.max(0.3,Math.min(4,view.k*f));
+  view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; render();
+},{passive:false});
+
+// ---- wire up ----------------------------------------------------------------
+$("#play").onclick=play;
+$("#stepf").onclick=()=>{ if(playing)play(); setStep(step+1); };
+$("#stepb").onclick=()=>{ if(playing)play(); setStep(step-1); };
+$("#scrub").oninput=e=>{ if(playing)play(); setStep(+e.target.value); };
+$("#relayout").onclick=()=>{ seedLayout(); relax(240); render(); };
+$("#file").onchange=ev=>{const f=ev.target.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>{ try{ load(JSON.parse(rd.result)); }
+    catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };
+addEventListener("resize",()=>{ if(G){ fitView(); render(); }});
+addEventListener("keydown",e=>{ if(e.key===" "){e.preventDefault();play();}
+  else if(e.key==="ArrowRight"){if(playing)play();setStep(step+1);}
+  else if(e.key==="ArrowLeft"){if(playing)play();setStep(step-1);}});
+
+// initial hook to reflect scrub position after load
+const _load=load; load=g=>{ _load(g); setStep(0); };
+
+// auto-load bundled example over http (fetch blocked on file://)
+if(location.protocol.startsWith("http")){
+  fetch("propagation.graph.json").then(r=>r.ok?r.json():Promise.reject())
+    .then(g=>{ load(g); const s=new URLSearchParams(location.search).get("step"); if(s!=null) setStep(+s); })
+    .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”, or run <code>cargo run --example propagation_demo</code> and serve this folder.</span>'; });
+} else {
+  $("#badge").innerHTML='<b>Open over http to auto-load the demo.</b><br><span class="m">e.g. <code>cd web &amp;&amp; python3 -m http.server</code>, or use “Load graph.json”.</span>';
+}
+</script>
+</body>
+</html>

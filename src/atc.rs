@@ -39,6 +39,9 @@ pub struct AtcConfig {
     pub max_iter: usize,
     /// Convergence threshold on co-inertia (RV) of consecutive configurations.
     pub coinertia_threshold: f64,
+    /// Record every intermediate configuration `Tᵖ` (for step-by-step
+    /// visualization). Off by default so the large-graph hot path pays nothing.
+    pub capture_trace: bool,
 }
 
 impl Default for AtcConfig {
@@ -48,8 +51,24 @@ impl Default for AtcConfig {
             self_loop: true,
             max_iter: 100,
             coinertia_threshold: 0.9,
+            capture_trace: false,
         }
     }
+}
+
+/// A step-by-step record of the propagation, for visualization. Present only when
+/// [`AtcConfig::capture_trace`] is set.
+#[derive(Clone, Debug)]
+pub struct AtcTrace {
+    /// The column-normalized configurations `T⁰, T¹, … , Tᵖ` (each is
+    /// `n_nodes × n_themes`). Length is `n_iterations + 1`.
+    pub configs: Vec<Vec<Vec<f64>>>,
+    /// Co-inertia (RV) between config `p-1` and `p`. Length `n_iterations`
+    /// (aligned with `configs[1..]`).
+    pub coinertia: Vec<f64>,
+    /// Per-node L2 change `‖rowᵢ(Tᵖ) − rowᵢ(Tᵖ⁻¹)‖₂` at each step. Length
+    /// `n_iterations` (aligned with `configs[1..]`).
+    pub delta: Vec<Vec<f64>>,
 }
 
 /// Result of an ATC run.
@@ -65,6 +84,8 @@ pub struct AtcResult {
     pub n_iterations: usize,
     /// Co-inertia (RV) of each consecutive pair of configurations.
     pub coinertia: Vec<f64>,
+    /// Full per-step trace (`None` unless [`AtcConfig::capture_trace`] was set).
+    pub trace: Option<AtcTrace>,
 }
 
 /// Build a node×theme membership matrix `T⁰` from a single categorical label per
@@ -98,6 +119,13 @@ pub fn compute(graph: &Graph, t0: &[Vec<f64>], cfg: &AtcConfig) -> AtcResult {
     let mut coinertia = Vec::new();
     let mut iters = 0usize;
 
+    // Trace buffers (only populated when requested). `configs` starts with T⁰.
+    let mut trace_configs: Vec<Vec<Vec<f64>>> = Vec::new();
+    let mut trace_delta: Vec<Vec<f64>> = Vec::new();
+    if cfg.capture_trace {
+        trace_configs.push(prev.clone());
+    }
+
     for _ in 0..cfg.max_iter {
         // Propagate: rowᵢ = w·prev[i] (self-loop) + Σ_{(u,w)∈adj[i]} w·prev[u].
         let mut cur: Vec<Vec<f64>> = (0..n)
@@ -124,15 +152,27 @@ pub fn compute(graph: &Graph, t0: &[Vec<f64>], cfg: &AtcConfig) -> AtcResult {
 
         let rv = rv_coefficient(&prev, &cur, m);
         let c_p = 1.0 - rv;
-        // Accumulate ATCᵢ += ‖rowᵢ(cur) − rowᵢ(prev)‖₂ · C_p.
-        atc.par_iter_mut().enumerate().for_each(|(i, a)| {
-            let mut d = 0.0;
-            for j in 0..m {
-                let diff = cur[i][j] - prev[i][j];
-                d += diff * diff;
-            }
-            *a += d.sqrt() * c_p;
-        });
+        // Per-node L2 change ‖rowᵢ(cur) − rowᵢ(prev)‖₂.
+        let dist: Vec<f64> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let mut d = 0.0;
+                for j in 0..m {
+                    let diff = cur[i][j] - prev[i][j];
+                    d += diff * diff;
+                }
+                d.sqrt()
+            })
+            .collect();
+        // Accumulate ATCᵢ += ‖Δrowᵢ‖ · C_p.
+        for (a, &d) in atc.iter_mut().zip(&dist) {
+            *a += d * c_p;
+        }
+
+        if cfg.capture_trace {
+            trace_configs.push(cur.clone());
+            trace_delta.push(dist);
+        }
 
         coinertia.push(rv);
         iters += 1;
@@ -152,11 +192,22 @@ pub fn compute(graph: &Graph, t0: &[Vec<f64>], cfg: &AtcConfig) -> AtcResult {
     // Alternative ATC = row sums of the converged configuration.
     let atc_last_config: Vec<f64> = prev.iter().map(|row| row.iter().sum()).collect();
 
+    let trace = if cfg.capture_trace {
+        Some(AtcTrace {
+            configs: trace_configs,
+            coinertia: coinertia.clone(),
+            delta: trace_delta,
+        })
+    } else {
+        None
+    };
+
     AtcResult {
         atc,
         atc_last_config,
         n_iterations: iters,
         coinertia,
+        trace,
     }
 }
 
@@ -291,8 +342,20 @@ mod tests {
             self_loop: true,
             coinertia_threshold: 2.0, // never converge -> run all steps
             max_iter: 49,             // R stores T0..T49 (49 propagations)
+            capture_trace: true,
         };
         let res = compute(&g, &m0, &cfg);
+        // Trace has T⁰ plus one config per step; deltas/coinertia align with steps.
+        let tr = res.trace.as_ref().expect("trace requested");
+        assert_eq!(tr.configs.len(), res.n_iterations + 1);
+        assert_eq!(tr.delta.len(), res.n_iterations);
+        assert_eq!(tr.coinertia.len(), res.n_iterations);
+        // Final config in the trace equals atc_last_config's source rows.
+        let last = tr.configs.last().unwrap();
+        for i in 0..10 {
+            let rowsum: f64 = last[i].iter().sum();
+            assert!((rowsum - res.atc_last_config[i]).abs() < 1e-9);
+        }
         let r_ref = [
             0.4028144, 0.5090365, 0.6156974, 0.0, 0.4028144, 0.4044723, 0.2421126, 0.2715327,
             0.1115623, 0.0399573,
