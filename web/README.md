@@ -41,9 +41,29 @@ graphs:
   against the scale-free criteria (Barabási's 2 ≤ γ ≤ 3; WGCNA's R² ≥ 0.80), and
   **recommends a min-|ecorr| threshold** that maximises the power-law fit while
   keeping a meaningful fraction of nodes. One click applies it.
-- Hover for taxonomy + degree; drag nodes, scroll to zoom, pan the background.
+- **Size by** degree or ATC (dist·co-inertia / last-config), when the graph
+  carries ATC.
+- **ATC propagation** — when the graph has an `atc_trace` (see below), a
+  play/scrub timeline animates the annotation propagation *on the real network*:
+  each node's colour blends its evolving theme mix `Tᵖ`, with the per-step
+  co-inertia readout. "off" restores the taxonomy colour.
+- Hover for taxonomy + degree + ATC; drag nodes, scroll to zoom, pan the background.
 
-Shareable views via URL query: `network.html?ec=0.4&sign=pos&colorby=phylum`.
+Shareable views via URL query:
+`network.html?ec=0.4&sign=pos&colorby=phylum&sizeby=atc_last&prop=4`.
+
+### Adding ATC to a network
+
+`graph.json` gains ATC from the validated engine — no re-run of the pipeline:
+
+```sh
+cargo run --example graph_atc -- web/scapis.graph.json phylum_group
+```
+
+This computes ATC on the graph's own edges, annotated by the chosen node field
+(here `phylum_group`), and writes back per-node `atc` / `atc_last`, the `themes`
++ `theme_colors`, and an `atc_trace` (the same shape the propagation player
+reads). Scores match the CLI / R reference.
 
 ```sh
 cd web && python3 -m http.server      # http://localhost:8000/network.html

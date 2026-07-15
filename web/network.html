@@ -118,6 +118,19 @@
       <h2>Colour by</h2>
       <select id="colorby"></select>
       <div class="legend" id="legend" style="margin-top:9px"></div>
+      <div style="margin-top:11px"><span class="lh" style="font-size:12px;color:var(--muted)">Size by</span>
+        <select id="sizeby" style="margin-top:5px"></select></div>
+    </div>
+
+    <div class="sec" id="propsec" style="display:none">
+      <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
+      <div class="hint" id="propintro" style="margin-bottom:8px"></div>
+      <div class="trow" style="display:flex;align-items:center;gap:8px">
+        <button class="btn" id="propplay" style="padding:5px 9px">▶</button>
+        <input type="range" id="propscrub" min="0" max="0" value="0" step="1" style="flex:1">
+        <span class="lh" style="min-width:56px;text-align:right"><b id="propstep">off</b></span>
+      </div>
+      <div class="rec" id="propinfo" style="margin-top:8px"></div>
     </div>
 
     <div class="sec">
@@ -160,6 +173,9 @@ const SF=$("#sf"), SFX=SF.getContext("2d");
 let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
 let view={x:0,y:0,k:1}, dpr=1, hot=-1, dragging=null, panning=null, offGroups=new Set();
 let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
+let sizeBy="degree", sizeMax={};
+// ATC propagation trace (present when the graph was enriched with graph_atc)
+let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
 
 // Canvas cannot use CSS var() strings — resolve theme colours to hex once.
 let COL={};
@@ -184,6 +200,29 @@ function load(g){
   colorField=g.meta?.color_by||opts[0];
   $("#colorby").value=colorField;
 
+  // size-by options: degree always; ATC variants when present
+  const hasAtc=nodes.some(n=>n.atc!=null);
+  const sizeOpts=[["degree","degree"]];
+  if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
+  $("#sizeby").innerHTML=sizeOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+  sizeBy="degree"; $("#sizeby").value="degree";
+  sizeMax={ atc:Math.max(1e-9,...nodes.map(n=>+n.atc||0)),
+            atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)) };
+
+  // ATC propagation trace (from graph_atc enrichment)
+  trace=g.atc_trace?.steps||[];
+  themeRGB=(g.theme_colors||[]).map(hexToRgb);
+  prop={step:null, playing:false, timer:null};
+  const ps=$("#propsec");
+  if(trace.length && g.themes){
+    ps.style.display="";
+    $("#propnote").textContent=`by ${g.atc_trace.annotation||"annotation"}`;
+    $("#propintro").innerHTML=`Watch the ${g.themes.length} theme weights T<sup>p</sup> diffuse across the network. Node colour blends its theme mix; off = taxonomy colour.`;
+    $("#propscrub").max=trace.length-1; $("#propscrub").value=0;
+    $("#propstep").textContent="off";
+    $("#propinfo").textContent="";
+  } else ps.style.display="none";
+
   // ecorr slider range from data
   const absE=edges.map(e=>Math.abs(e.ecorr)).filter(v=>isFinite(v));
   const lo=absE.length?Math.min(...absE):0, hi=absE.length?Math.max(...absE):1;
@@ -201,7 +240,9 @@ function load(g){
   if(q.get("sign")){ filt.sign=q.get("sign");
     $("#sign").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===filt.sign)); }
   if(q.get("ec")!=null){ const ec=$("#ec"); ec.value=q.get("ec"); filt.ec=+ec.value; }
+  if(q.get("sizeby")){ sizeBy=q.get("sizeby"); $("#sizeby").value=sizeBy; }
   syncLabels(); apply();
+  if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
@@ -222,7 +263,10 @@ function buildColors(){
   offGroups.clear(); drawLegend();
 }
 function groupOf(n){ return n[colorField]||"NA"; }
-function colorOf(n){ return gcolor[groupOf(n)]||n.color||"#8b949e"; }
+function colorOf(n){
+  if(prop.step!=null) return propColor(n.i);
+  return gcolor[groupOf(n)]||n.color||"#8b949e";
+}
 
 function drawLegend(){
   const cnt={}; nodes.forEach(n=>{const v=groupOf(n);cnt[v]=(cnt[v]||0)+1;});
@@ -321,7 +365,22 @@ function fitView(){
 // ---------- render ----------
 function resize(){ readColors(); dpr=devicePixelRatio||1; CV.width=stageW()*dpr; CV.height=stageH()*dpr;
   SF.width=(SF.clientWidth||300)*dpr; SF.height=(SF.clientHeight||150)*dpr; }
-function radiusOf(i){ return 2.2+2.4*Math.sqrt(VIS.deg[i]||0); }
+function radiusOf(i){
+  if(sizeBy==="degree") return 2.2+2.4*Math.sqrt(VIS.deg[i]||0);
+  const v=(+nodes[i][sizeBy])||0, mx=sizeMax[sizeBy]||1;
+  return 2.5+9*Math.sqrt(Math.max(0,v/mx));
+}
+function hexToRgb(h){ h=(h||"#888").replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join('');
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+// blended theme colour of node i at the current propagation step (row-normalized)
+function propColor(i){
+  const row=trace[prop.step]?.config?.[i]; if(!row) return COL.muted;
+  const tot=row.reduce((a,b)=>a+b,0);
+  if(tot<=1e-12) return COL.line;                 // no mass yet -> faint
+  let r=0,g=0,b=0; for(let j=0;j<row.length;j++){ const w=row[j]/tot;
+    r+=w*themeRGB[j][0]; g+=w*themeRGB[j][1]; b+=w*themeRGB[j][2]; }
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
 function render(){
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
@@ -448,7 +507,9 @@ CV.addEventListener("pointermove",ev=>{
     tip.style.left=Math.min(mx+14,stageW()-260)+"px"; tip.style.top=(my+14)+"px";
     tip.innerHTML=`<div class="t">${n.label||n.id}</div>`+
       row("phylum",n.phylum)+row("family",n.family)+row("genus",n.genus)+
-      row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"");
+      row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"")+
+      (n.atc!=null?row("ATC",(+n.atc).toFixed(4)):"")+
+      (prop.step!=null?row(`theme mix @step ${prop.step}`, themeMix(h)):"");
     inspect(h);
   } else tip.style.display="none";
 });
@@ -459,9 +520,19 @@ function inspect(i){
     (n.label?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
     row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
     row2("degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
+    (n.atc!=null?row2("ATC (dist·coin)",(+n.atc).toFixed(4)):"")+
+    (n.atc_last!=null?row2("ATC (last config)",(+n.atc_last).toFixed(4)):"")+
+    (prop.step!=null?row2(`theme mix @step ${prop.step}`, themeMix(i)):"")+
     ["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0).map(k=>row2(k,"✓")).join("");
 }
 function row2(k,v){ return v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
+// dominant theme (and share) of node i at the current propagation step
+function themeMix(i){
+  const row=trace[prop.step]?.config?.[i]; if(!row) return "—";
+  const tot=row.reduce((a,b)=>a+b,0); if(tot<=1e-12) return "—";
+  let bj=0; row.forEach((v,j)=>{ if(v>row[bj]) bj=j; });
+  return `${G.themes[bj]} ${Math.round(100*row[bj]/tot)}%`;
+}
 
 CV.addEventListener("pointerdown",ev=>{
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
@@ -493,8 +564,35 @@ $("#sign").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   b.classList.add("on"); filt.sign=b.dataset.v; apply();
 });
 $("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); };
+$("#sizeby").onchange=e=>{ sizeBy=e.target.value; render(); };
 $("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
   ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); };
+
+// ---------- ATC propagation ----------
+function setProp(s){
+  prop.step = s==null ? null : Math.max(0,Math.min(trace.length-1,s));
+  $("#propscrub").value = prop.step==null?0:prop.step;
+  $("#propstep").textContent = prop.step==null ? "off" : "step "+prop.step;
+  const info=$("#propinfo");
+  if(prop.step==null){ info.textContent=""; }
+  else {
+    const co=trace[prop.step]?.coinertia;
+    info.innerHTML = prop.step===0
+      ? `Initial config <b>T⁰</b> — each node one-hot on its ${G.atc_trace.annotation||"theme"}.`
+      : `Co-inertia RV = <b>${co!=null?co.toFixed(4):'—'}</b>${co>=0.9?' · converged':''}. Node colour = blended theme mix.`;
+  }
+  drawLegend(); render();
+}
+$("#propscrub").oninput=e=>{ if(prop.playing) playProp(); setProp(+e.target.value); };
+$("#propplay").onclick=()=>playProp();
+function playProp(){
+  prop.playing=!prop.playing; $("#propplay").textContent=prop.playing?"❚❚":"▶";
+  if(prop.playing){ if(prop.step==null) setProp(0); tickProp(); } else clearTimeout(prop.timer);
+}
+function tickProp(){ if(!prop.playing) return;
+  if(prop.step>=trace.length-1) setProp(0); else setProp(prop.step+1);
+  prop.timer=setTimeout(tickProp, 700);
+}
 $("#relayout").onclick=()=>{ seedLayout(); relax(300); render(); };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); load(JSON.parse(rd.result)); }

@@ -16,6 +16,10 @@ libm = "0.2"
 # Pure-Rust gzip (miniz_oxide backend) so `.gz` input works with no system deps.
 flate2 = "1"
 
+[dev-dependencies]
+# Only used by the `graph_atc` example to read/enrich an existing graph.json.
+serde_json = "1"
+
 [profile.release]
 opt-level = 3
 lto = true
