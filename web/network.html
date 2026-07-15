@@ -182,6 +182,7 @@ let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
 let sizeBy="degree", sizeMax={};
 // ATC propagation trace (present when the graph was enriched with graph_atc)
 let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
+let runAtc=null;  // running dist·co-inertia ATC per step (accumulates to final atc)
 // taxonomic-layer aggregation: the full species-level graph + current rank
 let baseGraph=null, layerRank="species";
 const RANKS=["species","genus","family","order","class","phylum"];
@@ -270,6 +271,15 @@ function load(g){
   trace=g.atc_trace?.steps||[];
   themeRGB=(g.theme_colors||[]).map(hexToRgb);
   prop={step:null, playing:false, timer:null};
+  // running ATC: cumulative Σ ‖Δrowᵢ‖·(1−coinertiaₚ) up to each step, normalized
+  // to the final total so it grows toward the final `atc` score.
+  runAtc=null;
+  if(trace.length){
+    const nN=nodes.length; let cum=new Array(nN).fill(0); const run=[cum.slice()];
+    for(let p=1;p<trace.length;p++){ const d=trace[p].delta, c=1-(trace[p].coinertia||0);
+      for(let i=0;i<nN;i++) cum[i]+=(d?+d[i]:0)*c; run.push(cum.slice()); }
+    const tot=cum.reduce((a,b)=>a+b,0)||1; runAtc=run.map(a=>a.map(v=>v/tot));
+  }
   const ps=$("#propsec");
   if(trace.length && g.themes){
     ps.style.display="";
@@ -424,10 +434,20 @@ function fitView(){
 function resize(){ readColors(); dpr=devicePixelRatio||1; CV.width=stageW()*dpr; CV.height=stageH()*dpr;
   SF.width=(SF.clientWidth||300)*dpr; SF.height=(SF.clientHeight||150)*dpr; }
 function radiusOf(i){
+  // During propagation, ATC sizes reflect the value *so far* at this step:
+  // dist·co-inertia accumulates; last-config = current row mass of Tᵖ.
+  if(prop.step!=null && (sizeBy==="atc"||sizeBy==="atc_last")){
+    let v,mx;
+    if(sizeBy==="atc"){ v=runAtc?runAtc[prop.step][i]:0; mx=sizeMax.atc; }
+    else { const row=trace[prop.step]?.config?.[i]; v=row?row.reduce((a,b)=>a+b,0):0; mx=sizeMax.atc_last; }
+    return 2.5+9*Math.sqrt(Math.max(0,v/(mx||1)));
+  }
   if(sizeBy==="degree") return 2.2+2.4*Math.sqrt(VIS.deg[i]||0);
   const v=(+nodes[i][sizeBy])||0, mx=sizeMax[sizeBy]||1;
   return 2.5+9*Math.sqrt(Math.max(0,v/mx));
 }
+// running ATC value of node i at the current step (for tooltip/inspector)
+function runAtcAt(i){ return (prop.step!=null && runAtc) ? runAtc[prop.step][i] : null; }
 function hexToRgb(h){ h=(h||"#888").replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join('');
   return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
 // blended theme colour of node i at the current propagation step (row-normalized)
@@ -566,8 +586,8 @@ CV.addEventListener("pointermove",ev=>{
     tip.innerHTML=`<div class="t">${n.label||n.id}</div>`+
       row("phylum",n.phylum)+row("family",n.family)+row("genus",n.genus)+
       row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"")+
-      (n.atc!=null?row("ATC",(+n.atc).toFixed(4)):"")+
-      (prop.step!=null?row(`theme mix @step ${prop.step}`, themeMix(h)):"");
+      (prop.step!=null && runAtcAt(h)!=null?row(`ATC @step ${prop.step}`, runAtcAt(h).toFixed(4)):(n.atc!=null?row("ATC",(+n.atc).toFixed(4)):""))+
+      (prop.step!=null?row("theme mix", themeMix(h)):"");
     inspect(h);
   } else tip.style.display="none";
 });
@@ -579,7 +599,8 @@ function inspect(i){
     (n.members!=null?row2("species (members)",n.members):"")+
     row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
     row2(n.members!=null?"between-taxa degree":"degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
-    (n.atc!=null?row2("ATC (dist·coin)",(+n.atc).toFixed(4)):"")+
+    (prop.step!=null && runAtcAt(i)!=null?row2(`ATC @step ${prop.step} (of ${(+n.atc).toFixed(4)})`, runAtcAt(i).toFixed(4)):
+      (n.atc!=null?row2("ATC (dist·coin)",(+n.atc).toFixed(4)):""))+
     (n.atc_last!=null?row2("ATC (last config)",(+n.atc_last).toFixed(4)):"")+
     (prop.step!=null?row2(`theme mix @step ${prop.step}`, themeMix(i)):"")+
     ["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0).map(k=>row2(k,"✓")).join("");
@@ -630,7 +651,11 @@ $("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
 
 // ---------- ATC propagation ----------
 function setProp(s){
+  const wasOff = prop.step==null;
   prop.step = s==null ? null : Math.max(0,Math.min(trace.length-1,s));
+  // Turning on: size by running ATC so you watch the score accumulate.
+  if(wasOff && prop.step!=null && runAtc && sizeBy!=="atc" && sizeBy!=="atc_last"){
+    sizeBy="atc"; if($("#sizeby").querySelector('[value=atc]')) $("#sizeby").value="atc"; }
   $("#propscrub").value = prop.step==null?0:prop.step;
   $("#propstep").textContent = prop.step==null ? "off" : "step "+prop.step;
   const info=$("#propinfo");
@@ -638,8 +663,9 @@ function setProp(s){
   else {
     const co=trace[prop.step]?.coinertia;
     info.innerHTML = prop.step===0
-      ? `Initial config <b>T⁰</b> — each node one-hot on its ${G.atc_trace.annotation||"theme"}.`
-      : `Co-inertia RV = <b>${co!=null?co.toFixed(4):'—'}</b>${co>=0.9?' · converged':''}. Node colour = blended theme mix.`;
+      ? `Initial config <b>T⁰</b> — each node one-hot on its ${G.atc_trace.annotation||"theme"}. ATC = 0.`
+      : `Co-inertia RV = <b>${co!=null?co.toFixed(4):'—'}</b>${co>=0.9?' · converged':''}. `+
+        `Colour = theme mix; size = ATC accumulated so far (Σ ‖Δ‖·(1−RV)).`;
   }
   drawLegend(); render();
 }
