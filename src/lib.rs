@@ -21,6 +21,7 @@ pub mod network;
 pub mod output;
 pub mod pipeline;
 pub mod recon;
+pub mod scalefree;
 pub mod scalenet;
 pub mod scs;
 pub mod spectral;

@@ -35,6 +35,7 @@ use xscalenet::discretize;
 use xscalenet::io;
 use xscalenet::output;
 use xscalenet::pipeline::RunConfig;
+use xscalenet::scalefree::{self, Sign};
 use xscalenet::scalenet::{Method, Params};
 
 struct Args {
@@ -52,6 +53,7 @@ struct Args {
     atc_col: Option<String>,
     theme_network: bool,
     json: bool,
+    scale_free: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -63,7 +65,7 @@ fn parse_args() -> Result<Args, String> {
              [--epsilon 0.001] [--restart 21] [--seed 6196] [--discretize] \
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
              [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
-             [--atc-col NAME] [--theme-network] [--json]",
+             [--atc-col NAME] [--theme-network] [--json] [--scale-free]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));
     }
@@ -81,6 +83,7 @@ fn parse_args() -> Result<Args, String> {
     let mut atc_col: Option<String> = None;
     let mut theme_network = false;
     let mut json = false;
+    let mut scale_free = false;
     let mut params = Params {
         var_perc: 0.2,
         eigen_perc: None,
@@ -120,6 +123,7 @@ fn parse_args() -> Result<Args, String> {
             "--atc-col" => atc_col = Some(value()?),
             "--theme-network" => theme_network = true,
             "--json" => json = true,
+            "--scale-free" => scale_free = true,
             "--methods" => {
                 methods = value()?
                     .split(',')
@@ -168,6 +172,7 @@ fn parse_args() -> Result<Args, String> {
         atc_col,
         theme_network,
         json,
+        scale_free,
     })
 }
 
@@ -296,6 +301,41 @@ fn run() -> Result<(), String> {
             if args.json {
                 output::write_json(&base.join("graph.json"), &result.nodes, net, &an)
                     .map_err(|e| format!("write json: {e}"))?;
+            }
+        }
+    }
+
+    // Optional scale-free topology analysis: sweep |ecorr| thresholds, fit a
+    // power-law degree distribution at each (P(k) ~ k^-gamma), and propose the
+    // threshold that best approximates scale-free topology (Barabási / WGCNA).
+    if args.scale_free {
+        for (ti, thr) in result.thresholds.iter().enumerate() {
+            let net = &result.consensus[ti].network;
+            let sweep = scalefree::sweep_ecorr(net, result.nodes.len(), 20, Sign::Both);
+            eprintln!("# Scale-free topology @ presFreq {thr}   (P(k) ~ k^-gamma)");
+            eprintln!("#   min|ecorr|  nodes  edges   gamma      R2   scale-free");
+            for r in &sweep {
+                match r.fit {
+                    Some(f) => eprintln!(
+                        "#       {:>6.3}  {:>5}  {:>5}   {:>5.2}   {:>5.3}   {}",
+                        r.threshold, r.n_nodes, r.n_edges, f.gamma, f.r2,
+                        if f.is_scale_free() { "yes" } else { "" }
+                    ),
+                    None => eprintln!(
+                        "#       {:>6.3}  {:>5}  {:>5}       -       -",
+                        r.threshold, r.n_nodes, r.n_edges
+                    ),
+                }
+            }
+            match scalefree::recommend(&sweep, 0.25) {
+                Some(rec) => {
+                    let f = rec.fit.unwrap();
+                    eprintln!(
+                        "#   -> recommended min|ecorr| ~ {:.3}: gamma={:.2}, R2={:.3}, keeps {:.0}% of nodes",
+                        rec.threshold, f.gamma, f.r2, rec.frac_nodes * 100.0
+                    );
+                }
+                None => eprintln!("#   -> no threshold kept enough of the network to fit"),
             }
         }
     }
