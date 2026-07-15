@@ -187,9 +187,14 @@ function readColors(){
 }
 
 // ---------- load ----------
+let hasFixedLayout=false;
 function load(g){
   G=g;
-  nodes=(g.nodes||[]).map((n,i)=>({...n,i,x:0,y:0,vx:0,vy:0}));
+  // Fixed layout: use igraph coordinates from the graph when present (y flipped
+  // to match the R/igraph plot, whose y points up). Otherwise force-layout.
+  hasFixedLayout = (g.nodes||[]).length>0 && g.nodes.every(n=>Number.isFinite(+n.x)&&Number.isFinite(+n.y)) && ('x' in (g.nodes[0]||{}));
+  nodes=(g.nodes||[]).map((n,i)=>({...n,i,
+    x:hasFixedLayout?+n.x:0, y:hasFixedLayout?-n.y:0, vx:0,vy:0}));
   idx={}; nodes.forEach((n,i)=>idx[n.id]=i);
   edges=(g.edges||[]).map(e=>({...e,a:idx[e.source],b:idx[e.target]})).filter(e=>e.a!=null&&e.b!=null);
   // colour options: declared color_by + any string/categorical node field
@@ -233,7 +238,8 @@ function load(g){
   $("#tn").max=edges.length; $("#tn").value=edges.length; filt.topN=1;
   $("#md").max=Math.min(20, Math.max(2,...nodes.map(n=>n.degree||0)));
 
-  buildColors(); seedLayout(); relax(300);
+  buildColors();
+  if(hasFixedLayout) fitView(); else { seedLayout(); relax(300); }
   // optional shareable view: ?ec=0.4&sign=pos&colorby=phylum
   const q=new URLSearchParams(location.search);
   if(q.get("colorby")){ colorField=q.get("colorby"); $("#colorby").value=colorField; buildColors(); }
@@ -357,7 +363,7 @@ function fitView(){
   const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
   const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
   const W=stageW(),H=stageH(),pad=50;
-  const k=Math.min((W-2*pad)/Math.max(1,maxx-minx),(H-2*pad)/Math.max(1,maxy-miny),2.5);
+  const k=Math.min((W-2*pad)/Math.max(1e-6,maxx-minx),(H-2*pad)/Math.max(1e-6,maxy-miny),60);
   view.k=isFinite(k)&&k>0?k:1;
   view.x=W/2-((minx+maxx)/2)*view.k; view.y=H/2-((miny+maxy)/2)*view.k;
 }
@@ -399,7 +405,7 @@ function render(){
   for(const n of nodes){
     if(!VIS.visN.has(n.i)) continue;
     const on = !nbr || nbr.has(n.i);
-    const r=radiusOf(n.i);
+    const r=radiusOf(n.i)/view.k;   // screen-constant node size (zoom-independent)
     CTX.globalAlpha=on?1:0.12;
     CTX.beginPath(); CTX.arc(n.x,n.y,r,0,7); CTX.fillStyle=colorOf(n); CTX.fill();
     if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
@@ -492,7 +498,7 @@ function toGraph(mx,my){ return {x:(mx-view.x)/view.k, y:(my-view.y)/view.k}; }
 function pick(mx,my){
   const p=toGraph(mx,my); let best=-1,bd=1e9;
   for(const n of nodes){ if(!VIS.visN.has(n.i))continue;
-    const d=Math.hypot(n.x-p.x,n.y-p.y), r=radiusOf(n.i)+3/view.k;
+    const d=Math.hypot(n.x-p.x,n.y-p.y), r=(radiusOf(n.i)+3)/view.k;
     if(d<r&&d<bd){bd=d;best=n.i;} }
   return best;
 }
@@ -593,7 +599,11 @@ function tickProp(){ if(!prop.playing) return;
   if(prop.step>=trace.length-1) setProp(0); else setProp(prop.step+1);
   prop.timer=setTimeout(tickProp, 700);
 }
-$("#relayout").onclick=()=>{ seedLayout(); relax(300); render(); };
+$("#relayout").onclick=()=>{
+  if(hasFixedLayout){ nodes.forEach(n=>{ n.x=+G.nodes[n.i].x; n.y=-G.nodes[n.i].y; }); fitView(); }
+  else { seedLayout(); relax(300); }
+  render();
+};
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); load(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };
