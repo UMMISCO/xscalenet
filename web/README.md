@@ -82,6 +82,9 @@ graphs:
   name); ↑/↓ + Enter or click a result to select and centre/zoom on it, or
   **Select all N matches** to multi-select a whole taxon (then Focus / Export it).
   Essential on large imported networks. (`?find=<query>`)
+- **Inspect an edge** — hover an edge for its endpoints (with orientation arrow),
+  signed `ecorr`, presence score and orient score; it highlights. Click it to
+  select both endpoints (→ the 1-hop path).
 - **Select a node & act on it** — click a node to *pin* it (Shift/⌘-click for
   multi-select; click empty / Esc to clear). The Node panel then shows its full
   taxonomy, degree, ATC, and a **signed partner list** (neighbours sorted by

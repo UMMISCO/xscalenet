@@ -304,7 +304,7 @@ const $=s=>document.querySelector(s);
 const CV=$("#cv"), CTX=CV.getContext("2d");
 const SF=$("#sf"), SFX=SF.getContext("2d");
 let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
-let view={x:0,y:0,k:1}, dpr=1, hot=-1, dragging=null, panning=null, offGroups=new Set();
+let view={x:0,y:0,k:1}, dpr=1, hot=-1, hotEdge=null, dragging=null, panning=null, offGroups=new Set();
 let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
 let focusLabel="", focusKey="";   // human label + identity of the current focus
@@ -948,8 +948,9 @@ function render(){
   for(const e of VIS.edges){
     const a=nodes[e.a],b=nodes[e.b];
     const onPath = pathOn && pathEdgeSet.has(e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a);
-    if(onPath){
-      CTX.globalAlpha=1; CTX.strokeStyle=COL.accent; CTX.lineWidth=3.2/view.k;
+    if(onPath || e===hotEdge){
+      CTX.globalAlpha=1; CTX.strokeStyle=e===hotEdge?(e.ecorr<0?COL.neg:COL.accent):COL.accent;
+      CTX.lineWidth=(e===hotEdge?3:3.2)/view.k;
       CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue;
     }
     // highlight only the induced subgraph — BOTH endpoints in the neighbourhood.
@@ -1073,23 +1074,37 @@ function pick(mx,my){
     if(d<r&&d<bd){bd=d;best=n.i;} }
   return best;
 }
+function segDist(px,py,ax,ay,bx,by){ const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy;
+  let t=L>0?((px-ax)*dx+(py-ay)*dy)/L:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(ax+t*dx), py-(ay+t*dy)); }
+function pickEdge(mx,my){ const p=toGraph(mx,my), thr=5/view.k; let best=null,bd=thr;
+  for(const e of VIS.edges){ const a=nodes[e.a],b=nodes[e.b];
+    const d=segDist(p.x,p.y,a.x,a.y,b.x,b.y); if(d<bd){bd=d;best=e;} }
+  return best;
+}
 CV.addEventListener("pointermove",ev=>{
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
   if(down && !down.moved && Math.hypot(ev.clientX-down.x, ev.clientY-down.y)>4) down.moved=true;
   if(dragging){ if(!down||down.moved){ const p=toGraph(mx,my); dragging.x=p.x; dragging.y=p.y;
     dragging.vx=dragging.vy=0; if(sim.on) reheat(0.3); else render(); } return; }
   if(panning){ view.x=panning.vx+(ev.clientX-panning.px); view.y=panning.vy+(ev.clientY-panning.py); render(); return; }
-  const h=pick(mx,my);
-  if(h!==hot){ hot=h; render(); }
+  const h=pick(mx,my); const he=h<0?pickEdge(mx,my):null;
+  if(h!==hot || he!==hotEdge){ hot=h; hotEdge=he; render(); }
   const tip=$("#tip");
-  if(h>=0){ const n=nodes[h]; tip.style.display="block";
-    tip.style.left=Math.min(mx+14,stageW()-260)+"px"; tip.style.top=(my+14)+"px";
+  const place=()=>{ tip.style.display="block"; tip.style.left=Math.min(mx+14,stageW()-260)+"px"; tip.style.top=(my+14)+"px"; };
+  if(h>=0){ const n=nodes[h]; place();
     tip.innerHTML=`<div class="t">${n.label||n.id}</div>`+
       row("phylum",n.phylum)+row("family",n.family)+row("genus",n.genus)+
       row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"")+
       (prop.step!=null && runAtcAt(h)!=null?row(`ATC @step ${prop.step}`, runAtcAt(h).toFixed(4)):(n.atc!=null?row("ATC",(+n.atc).toFixed(4)):""))+
       (prop.step!=null?row("theme mix", themeMix(h)):"");
     if(!selected.size) inspect(h,false);
+  } else if(he){ place(); const dir=he.orient===1?'→':he.orient===-1?'←':'—';
+    tip.innerHTML=`<div class="t">${nodes[he.a].id} ${dir} ${nodes[he.b].id}</div>`+
+      row("ecorr", `<span style="color:${he.ecorr<0?COL.neg:COL.pos}">${he.ecorr>=0?'+':''}${(+he.ecorr).toFixed(3)}</span>`)+
+      (he.score!=null?row("presence score",(+he.score).toFixed(3)):"")+
+      (he.orient_score!=null?row("orient score",(+he.orient_score).toFixed(3)):"")+
+      (he.weight!=null?row("species-edges",he.weight):"");
   } else tip.style.display="none";
 });
 function row(k,v){ return v==null||v===""?"":`<div class="r"><span>${k}</span><b>${v}</b></div>`; }
@@ -1275,8 +1290,8 @@ function themeMix(i){
 
 CV.addEventListener("pointerdown",ev=>{
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
-  const h=pick(mx,my);
-  down={i:h, x:ev.clientX, y:ev.clientY, moved:false, add:ev.shiftKey||ev.metaKey||ev.ctrlKey};
+  const h=pick(mx,my), edge=h<0?pickEdge(mx,my):null;
+  down={i:h, edge, x:ev.clientX, y:ev.clientY, moved:false, add:ev.shiftKey||ev.metaKey||ev.ctrlKey};
   if(h>=0){ dragging=nodes[h]; }
   else { panning={px:ev.clientX,py:ev.clientY,vx:view.x,vy:view.y}; CV.classList.add("drag"); }
   CV.setPointerCapture(ev.pointerId);
@@ -1284,6 +1299,7 @@ CV.addEventListener("pointerdown",ev=>{
 addEventListener("pointerup",()=>{
   if(down && !down.moved){                       // a click, not a drag/pan
     if(down.i>=0) selectNode(down.i, down.add);
+    else if(down.edge){ selected=new Set([down.edge.a, down.edge.b]); focus=null; focusKey=""; showInfo(); render(); }  // select the edge's endpoints
     else if(!down.add) clearSelection();          // click on empty background clears
   }
   dragging=null; panning=null; down=null; CV.classList.remove("drag");
