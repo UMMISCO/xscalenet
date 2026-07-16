@@ -574,15 +574,51 @@ function seedLayout(){
 // One force-integration pass over `ns` (repulsion among ns, spring attraction
 // along `es`, gentle pull to their centroid), movement scaled by `alpha`.
 // Shared by the one-shot relax() and the live simulation.
+// ---- Barnes-Hut quadtree (O(n log n) repulsion for large graphs) ----
+function bhTree(ns){
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  for(const n of ns){ if(n.x<minx)minx=n.x; if(n.x>maxx)maxx=n.x; if(n.y<miny)miny=n.y; if(n.y>maxy)maxy=n.y; }
+  const s=Math.max(maxx-minx,maxy-miny,1e-6);
+  const root={x0:minx,y0:miny,s,mass:0,cx:0,cy:0,body:null,kids:null};
+  for(const n of ns) bhInsert(root,n);
+  return root;
+}
+function bhInsert(node,p){
+  node.cx=(node.cx*node.mass+p.x)/(node.mass+1); node.cy=(node.cy*node.mass+p.y)/(node.mass+1); node.mass++;
+  if(node.mass===1){ node.body=p; return; }
+  if(node.s<1e-4) return;                       // too small to subdivide → cluster
+  if(!node.kids){ node.kids=[null,null,null,null]; const b=node.body; node.body=null; if(b) bhPlace(node,b); }
+  bhPlace(node,p);
+}
+function bhPlace(node,p){
+  const half=node.s/2, qx=p.x>=node.x0+half?1:0, qy=p.y>=node.y0+half?1:0, qi=qy*2+qx;
+  if(!node.kids[qi]) node.kids[qi]={x0:node.x0+qx*half,y0:node.y0+qy*half,s:half,mass:0,cx:0,cy:0,body:null,kids:null};
+  bhInsert(node.kids[qi],p);
+}
+function bhForce(node,p,theta2,k2,acc){
+  if(node.mass===0 || (node.body===p && node.mass===1)) return;
+  let dx=p.x-node.cx, dy=p.y-node.cy, d2=dx*dx+dy*dy; if(d2<1e-9) d2=1e-9;
+  if(node.kids===null || (node.s*node.s)/d2 < theta2){        // far enough → whole cell as one body
+    const d=Math.sqrt(d2), f=k2/d2*2.0*node.mass; acc.fx+=dx/d*f; acc.fy+=dy/d*f; return;
+  }
+  for(const c of node.kids) if(c) bhForce(c,p,theta2,k2,acc);
+}
+
 function forcePass(ns, es, alpha){
   if(ns.length<2) return;
-  const W=stageW(),H=stageH(), k=Math.sqrt(W*H/Math.max(1,ns.length))*0.62;
+  const W=stageW(),H=stageH(), k=Math.sqrt(W*H/Math.max(1,ns.length))*0.62, k2=k*k;
   let ccx=0,ccy=0; for(const n of ns){ccx+=n.x;ccy+=n.y;} ccx/=ns.length; ccy/=ns.length;
   for(const n of ns){ n.vx*=0.88; n.vy*=0.88; }
-  for(let i=0;i<ns.length;i++){const a=ns[i];
-    for(let j=i+1;j<ns.length;j++){const b=ns[j];
-      let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
-      const f=k*k/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
+  // repulsion: Barnes-Hut above ~250 nodes (O(n log n)), exact pairwise below.
+  if(ns.length>250){
+    const tree=bhTree(ns), theta2=0.81;
+    for(const p of ns){ const acc={fx:0,fy:0}; bhForce(tree,p,theta2,k2,acc); p.vx+=acc.fx; p.vy+=acc.fy; }
+  } else {
+    for(let i=0;i<ns.length;i++){const a=ns[i];
+      for(let j=i+1;j<ns.length;j++){const b=ns[j];
+        let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
+        const f=k2/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
+  }
   for(const e of es){const a=nodes[e.a],b=nodes[e.b]; if(!a||!b)continue;
     let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.06;
     a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
