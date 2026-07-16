@@ -65,7 +65,8 @@ fn parse_args() -> Result<Args, String> {
              [--epsilon 0.001] [--restart 21] [--seed 6196] [--discretize] \
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
              [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
-             [--atc-col NAME] [--theme-network] [--json] [--scale-free]",
+             [--atc-col NAME] [--theme-network] [--json] [--scale-free] \
+             [--iterative-eigen]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));
     }
@@ -94,6 +95,7 @@ fn parse_args() -> Result<Args, String> {
         max_iter: 10_000,
         iss: 1.0,
         maxp: usize::MAX,
+        iterative_eigen: false,
     };
 
     let mut i = 3;
@@ -124,6 +126,7 @@ fn parse_args() -> Result<Args, String> {
             "--theme-network" => theme_network = true,
             "--json" => json = true,
             "--scale-free" => scale_free = true,
+            "--iterative-eigen" => params.iterative_eigen = true,
             "--methods" => {
                 methods = value()?
                     .split(',')

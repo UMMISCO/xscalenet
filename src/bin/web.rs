@@ -161,6 +161,7 @@ fn build_graph_json(
         max_iter: num_u("max_iter", 10_000),
         iss: num_f("iss", 1.0),
         maxp: f.get("maxp").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX),
+        iterative_eigen: flag("iterative_eigen"),
     };
 
     let config = RunConfig { methods, params };

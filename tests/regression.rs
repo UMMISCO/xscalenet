@@ -26,6 +26,7 @@ fn params() -> Params {
         max_iter: 10_000,
         iss: 1.0,
         maxp: usize::MAX,
+        iterative_eigen: false,
     }
 }
 

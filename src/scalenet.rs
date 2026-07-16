@@ -42,6 +42,9 @@ pub struct Params {
     pub max_iter: usize,
     pub iss: f64,
     pub maxp: usize,
+    /// Use the iterative (Lanczos) eigensolver for the spectral embedding — a
+    /// fast path when `eigen_perc` is fixed. Off by default (dense, bit-identical).
+    pub iterative_eigen: bool,
 }
 
 /// The per-pair values for one present edge (`NaN` = NA). Presence is implicit:
@@ -104,6 +107,8 @@ pub fn prepare(data: &Dataset, params: &Params) -> Result<Prep, String> {
         ncol,
         params.eigen_perc,
         subset_m,
+        params.iterative_eigen,
+        params.seed,
     )?;
 
     // Map surviving node name -> global column index.

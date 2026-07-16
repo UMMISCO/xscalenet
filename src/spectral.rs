@@ -41,6 +41,8 @@ pub fn compute(
     ncol_all: usize,
     eigen_perc: Option<f64>,
     subset_m: usize,
+    iterative: bool,
+    seed: u64,
 ) -> Result<Spectral, String> {
     // Affinity = mutual information matrix (>=0, zero diagonal).
     let w = mi::build_mim(cols, levels);
@@ -76,37 +78,41 @@ pub fn compute(
         }
     }
 
-    // Symmetric eigendecomposition.
-    let eig = m.symmetric_eigen();
-    let vals = eig.eigenvalues;
-    let vecs = eig.eigenvectors;
-
-    // Sort ascending by eigenvalue.
-    let mut order: Vec<usize> = (0..q).collect();
-    order.sort_by(|&i, &j| vals[i].total_cmp(&vals[j]));
-    let eigenvalues: Vec<f64> = order.iter().map(|&i| vals[i]).collect();
-
-    // Determine k.
-    let perc = match eigen_perc {
-        Some(pc) => pc,
-        None => best_k_perc(&eigenvalues),
+    // Iterative fast path: only usable when k is fixed (`eigen_perc`), since the
+    // elbow needs the full spectrum. Returns `None` if it did not converge, in
+    // which case we fall back to the exact dense solver below.
+    let iter_result = if iterative && eigen_perc.is_some() {
+        let k = ((eigen_perc.unwrap() * ncol_all as f64).ceil() as usize).clamp(2, q);
+        crate::lanczos::smallest_eigenpairs(&m, k, seed).map(|(vals, vecs)| (vals, vecs, k))
+    } else {
+        None
     };
-    let mut k = (perc * ncol_all as f64).ceil() as usize;
-    if k < 2 {
-        k = 2;
-    }
-    if k > q {
-        k = q;
-    }
 
-    // Materialise the first k eigenvectors (column c = order[c]).
-    let mut eigenvectors = vec![vec![0.0f64; k]; q];
-    for c in 0..k {
-        let col = order[c];
-        for r in 0..q {
-            eigenvectors[r][c] = vecs[(r, col)];
+    let (eigenvalues, eigenvectors, k) = if let Some(r) = iter_result {
+        r
+    } else {
+        // Full dense symmetric eigendecomposition.
+        let eig = m.symmetric_eigen();
+        let vals = eig.eigenvalues;
+        let vecs = eig.eigenvectors;
+        let mut order: Vec<usize> = (0..q).collect();
+        order.sort_by(|&i, &j| vals[i].total_cmp(&vals[j]));
+        let eigenvalues: Vec<f64> = order.iter().map(|&i| vals[i]).collect();
+        let perc = match eigen_perc {
+            Some(pc) => pc,
+            None => best_k_perc(&eigenvalues),
+        };
+        let mut k = (perc * ncol_all as f64).ceil() as usize;
+        k = k.clamp(2, q);
+        let mut eigenvectors = vec![vec![0.0f64; k]; q];
+        for c in 0..k {
+            let col = order[c];
+            for r in 0..q {
+                eigenvectors[r][c] = vecs[(r, col)];
+            }
         }
-    }
+        (eigenvalues, eigenvectors, k)
+    };
 
     Ok(Spectral {
         node_names,
