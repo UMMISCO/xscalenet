@@ -529,9 +529,9 @@ function computeVisible(){
     if(focus && (!focus.has(e.a)||!focus.has(e.b))) continue;   // ego-network focus
     kept.push(e); deg[e.a]++; deg[e.b]++;
   }
-  // min-degree prunes nodes (iteratively would be ideal; one pass is enough for the UI)
+  // min-degree prunes nodes; at 0 even isolated nodes (degree 0 in the view) show.
   const visN=new Set();
-  nodes.forEach(n=>{ if(deg[n.i]>=Math.max(1,filt.md) && !offGroups.has(groupOf(n)) && (!focus||focus.has(n.i))) visN.add(n.i); });
+  nodes.forEach(n=>{ if(deg[n.i]>=filt.md && !offGroups.has(groupOf(n)) && (!focus||focus.has(n.i))) visN.add(n.i); });
   const fe=kept.filter(e=>visN.has(e.a)&&visN.has(e.b));
   return {edges:fe, visN, deg};
 }
