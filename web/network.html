@@ -875,14 +875,17 @@ addEventListener("keydown",e=>{ if(e.key==="Escape"){ if(focus){focus=null;apply
 $("#focusclear").onclick=clearFocus;
 // zoom by `factor` keeping the point (mx,my) under the cursor/fingers fixed
 function zoomAt(mx,my,factor){
-  const nk=Math.max(0.1,Math.min(10,view.k*factor));
+  const nk=Math.max(0.08,Math.min(40,view.k*factor));   // generous headroom both ways
+  if(nk===view.k) return;
   view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; render();
 }
 CV.addEventListener("wheel",ev=>{ ev.preventDefault();
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
-  // Trackpad pinch arrives as ctrl+wheel — zoom firmly; plain wheel zooms gently.
-  const rate = ev.ctrlKey ? 0.02 : 0.0015;
-  zoomAt(mx,my, Math.exp(-ev.deltaY*rate));
+  // Trackpad pinch arrives as ctrl+wheel. Cap the per-event step so a single big
+  // delta can't slam into the zoom limit (that made zoom-in "stick at max").
+  const rate = ev.ctrlKey ? 0.01 : 0.0015;
+  const factor = Math.min(1.25, Math.max(0.8, Math.exp(-ev.deltaY*rate)));
+  zoomAt(mx,my, factor);
 },{passive:false});
 
 // Touch pinch (touchscreens / touch laptops): zoom around the fingers' midpoint.
