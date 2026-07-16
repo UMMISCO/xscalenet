@@ -480,7 +480,10 @@ function load(g){
   edges=(g.edges||[]).map(e=>({...e,a:idx[e.source],b:idx[e.target]})).filter(e=>e.a!=null&&e.b!=null);
   // colour options: declared color_by + any string/categorical node field
   const fields=new Set();
-  for(const n of nodes) for(const k in n) if(typeof n[k]==="string" && !["id","label","color"].includes(k)) fields.add(k);
+  // gtdb (constant version tag) and gtdb_classification (unique per node) are
+  // useless as colour categories — kept on the node for the inspector, hidden here.
+  const NOCOLOR=["id","label","color","gtdb","gtdb_classification"];
+  for(const n of nodes) for(const k in n) if(typeof n[k]==="string" && !NOCOLOR.includes(k)) fields.add(k);
   const opts=[g.meta?.color_by, ...fields].filter((v,i,a)=>v&&a.indexOf(v)===i);
   $("#colorby").innerHTML=opts.map(o=>`<option>${o}</option>`).join("");
   colorField=g.meta?.color_by||opts[0];

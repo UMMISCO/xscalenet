@@ -6,3 +6,5 @@ web/scapis.graph.json
 .DS_Store
 web/scapis2417.graph.json
 web/s250.graph.json
+# client-data graph backups (e.g. from .private/tools/annotate_msp.py)
+web/*.graph.json.bak
