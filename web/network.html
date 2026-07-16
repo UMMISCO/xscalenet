@@ -719,13 +719,15 @@ function focusModule(mid){
 function resize(){ readColors(); dpr=devicePixelRatio||1; CV.width=stageW()*dpr; CV.height=stageH()*dpr;
   SF.width=(SF.clientWidth||300)*dpr; SF.height=(SF.clientHeight||150)*dpr; }
 function radiusOf(i){
-  // During propagation, ATC sizes reflect the value *so far* at this step:
-  // dist·co-inertia accumulates; last-config = current row mass of Tᵖ.
-  if(prop.step!=null && (sizeBy==="atc"||sizeBy==="atc_last")){
+  // During propagation the node size ALWAYS tracks the propagation, regardless of
+  // the "Size by" control: the ATC accrued so far (dist·co-inertia), or the
+  // current row mass of Tᵖ if "last config" is chosen. Values are tiny relative
+  // to the max, so scale generously so the growth is visible.
+  if(prop.step!=null && (runAtc || sizeBy==="atc_last")){
     let v,mx;
-    if(sizeBy==="atc"){ v=runAtc?runAtc[prop.step][i]:0; mx=sizeMax.atc; }
-    else { const row=trace[prop.step]?.config?.[i]; v=row?row.reduce((a,b)=>a+b,0):0; mx=sizeMax.atc_last; }
-    return 2.5+9*Math.sqrt(Math.max(0,v/(mx||1)));
+    if(sizeBy==="atc_last"){ const row=trace[prop.step]?.config?.[i]; v=row?row.reduce((a,b)=>a+b,0):0; mx=sizeMax.atc_last; }
+    else { v=runAtc?runAtc[prop.step][i]:0; mx=sizeMax.atc; }
+    return 2.5+13*Math.sqrt(Math.max(0,v/(mx||1)));
   }
   if(sizeBy==="degree") return 2.2+2.4*Math.sqrt(VIS.deg[i]||0);
   const v=(+nodes[i][sizeBy])||0, mx=sizeMax[sizeBy]||1;
