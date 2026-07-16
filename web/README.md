@@ -91,8 +91,12 @@ graphs:
   weighted by `|ecorr|`, on the full graph or **the filtered view only**);
   reports the modularity **Q** and #modules, colours the network by module, and
   lists modules with a **taxonomy composition bar + homogeneity %** (cross
-  modules × taxonomy — are the communities taxonomically pure?). Click a module
-  to isolate it. `?modules=1` deep-links a coloured partition.
+  modules × taxonomy — are the communities taxonomically pure?), and — with
+  **enrichment** on — each module's **signature**: the most over-represented
+  annotation feature (any taxonomy rank or functional column) by a one-sided
+  **Fisher exact test + Benjamini-Hochberg** (a phylum-pure Bacillota module
+  resolves to e.g. "▲ Lachnospiraceae · family · q=3e-17"). Click a module to
+  isolate it. `?modules=1` deep-links a coloured partition.
 - **Taxonomic layers** — collapse the species network to any rank (genus →
   phylum): each node becomes a taxon at its members' layout centroid, sized by
   number of species, with between-taxa edges (width ∝ number of species-edges).

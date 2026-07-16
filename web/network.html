@@ -137,6 +137,8 @@
   .modhead b{font-variant-numeric:tabular-nums}
   .modbar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:3px}
   .modbar span{display:block;min-width:1px}
+  .modsig{font-size:11px;margin-top:3px;color:var(--accent);font-weight:600}
+  .modsig span{color:var(--muted);font-weight:400}
 </style>
 </head>
 <body>
@@ -184,6 +186,8 @@
         <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
         <input type="checkbox" id="modfiltered"> on the filtered view only</label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
+        <input type="checkbox" id="modenrich" checked> enrichment (Fisher + BH)</label>
       <button class="btn primary" id="moddetect" style="width:100%;margin-top:8px;justify-content:center">Detect modules (Louvain)</button>
       <div class="hint" id="modhint" style="margin-top:7px">Partition the network into communities that maximise modularity, then colour by module.</div>
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
@@ -675,6 +679,62 @@ function taxColor(pg){
   let h=0; for(let i=0;i<pg.length;i++) h=(h*31+pg.charCodeAt(i))>>>0; return TAXPAL[h%TAXPAL.length];
 }
 function taxonOf(nd){ return nd.phylum_group||nd.phylum||"—"; }
+
+// ---------- module enrichment (Fisher over-representation + Benjamini-Hochberg) ----------
+function logGamma(x){
+  const c=[0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,
+    -176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
+  if(x<0.5) return Math.log(Math.PI/Math.sin(Math.PI*x))-logGamma(1-x);
+  x-=1; let a=c[0]; const t=x+7.5; for(let i=1;i<9;i++) a+=c[i]/(x+i);
+  return 0.5*Math.log(2*Math.PI)+(x+0.5)*Math.log(t)-t+Math.log(a);
+}
+const logChoose=(n,k)=> (k<0||k>n)?-Infinity : logGamma(n+1)-logGamma(k+1)-logGamma(n-k+1);
+// one-sided Fisher: P(X>=a) drawing nn from N with K successes (over-representation)
+function fisherOver(a,N,K,nn){
+  if(a<=0) return 1; let p=0; const kmax=Math.min(K,nn);
+  for(let k=a;k<=kmax;k++) p+=Math.exp(logChoose(K,k)+logChoose(N-K,nn-k)-logChoose(N,nn));
+  return Math.min(1,Math.max(0,p));
+}
+// categorical annotation fields worth testing (taxonomy ranks, functional 0/1)
+function enrichFields(){
+  const block=new Set(["id","label","color","module","phylum_group","name","name_long","gtdb",
+    "gtdb_classification","found","annotated","border_color","border_width","shape","superkingdom","species"]);
+  const metric=k=>["degree","betweenness","closeness","clustering","community","strength","modular_degree",
+    "modular_betweenness","atc","atc_last","abundance","avg_abundance","degree_r","node_size","bf_value","x","y","vx","vy","i"].includes(k);
+  const keys=new Set(); nodes.forEach(n=>Object.keys(n).forEach(k=>keys.add(k)));
+  const out=[];
+  for(const k of keys){ if(block.has(k)||metric(k)) continue;
+    const vals=new Map();
+    for(const n of nodes){ let v=n[k]; if(v==null||v==="")continue; v=String(v);
+      if(v==="NA"||v==="Unclassified")continue; vals.set(v,(vals.get(v)||0)+1); }
+    if(vals.size<1||vals.size>200) continue;
+    let cats=[...vals.keys()];
+    if(cats.length<=2 && cats.every(c=>c==="0"||c==="1")) cats=cats.includes("1")?["1"]:[];
+    if(cats.length) out.push({field:k, cats});
+  }
+  return out;
+}
+// most over-represented feature per module (BH-adjusted); returns {mid:{field,val,a,K,nn,q}}
+function computeEnrichment(){
+  const N=nodes.length, fields=enrichFields();
+  const byMod={}; nodes.forEach(n=>{ if(n.module)(byMod[n.module]=byMod[n.module]||[]).push(n); });
+  const tests=[];
+  for(const {field,cats} of fields){
+    const K={}; cats.forEach(c=>K[c]=0);
+    for(const n of nodes){ const v=String(n[field]); if(K[v]!=null) K[v]++; }
+    for(const mid in byMod){ const ms=byMod[mid], nn=ms.length, a={}; cats.forEach(c=>a[c]=0);
+      for(const n of ms){ const v=String(n[field]); if(a[v]!=null) a[v]++; }
+      for(const c of cats){ if(a[c]<2) continue;                 // ignore singletons
+        tests.push({mid,field,val:c,a:a[c],K:K[c],nn,p:fisherOver(a[c],N,K[c],nn)}); } }
+  }
+  if(!tests.length) return {};
+  tests.sort((x,y)=>x.p-y.p); const m=tests.length; let minq=1;
+  for(let i=m-1;i>=0;i--){ tests[i].q=minq=Math.min(minq, tests[i].p*m/(i+1)); }
+  const best={}; for(const t of tests){ if(!best[t.mid]||t.q<best[t.mid].q) best[t.mid]=t; }
+  return best;
+}
+function fmtQ(q){ return q<1e-3 ? q.toExponential(0) : q.toFixed(3); }
+
 function detectModules(){
   const weighted=$("#modweight").checked, onFiltered=$("#modfiltered").checked;
   const pool = onFiltered ? [...VIS.visN] : nodes.map(n=>n.i);
@@ -702,9 +762,10 @@ function detectModules(){
   if(!$("#colorby").querySelector('option[value=module]')){
     const o=document.createElement("option"); o.value="module"; o.textContent="module (Louvain)"; $("#colorby").appendChild(o); }
   colorField="module"; $("#colorby").value="module"; buildColors(); apply();
-  // module list with taxonomy composition (cross modules × taxonomy)
+  // module list with taxonomy composition (cross modules × taxonomy) + enrichment
   const hasTax=nodes.some(nd=>nd.phylum_group||nd.phylum);
   const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
+  const enr = $("#modenrich").checked ? computeEnrichment() : {};
   const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
     const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
@@ -712,9 +773,11 @@ function detectModules(){
     const dom=comp[0]||["—",0], homog=ms.length?Math.round(100*dom[1]/ms.length):0;
     const bar=hasTax? `<div class="modbar">${comp.map(([p,c])=>
         `<span style="flex:${c};background:${taxColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
+    const e=enr[mid];
+    const sig = (e&&e.q<0.05) ? `<div class="modsig" title="Fisher over-representation, BH q=${e.q.toExponential(2)}">▲ ${e.val} <span>· ${e.field} · q=${fmtQ(e.q)}</span></div>` : "";
     return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid}">`+
       `<div class="modhead"><span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
-      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}</div>`;
+      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}${sig}</div>`;
   }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more modules</div>`:"");
 }
 function focusModule(mid){
@@ -1133,6 +1196,7 @@ $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) 
 $("#moddetect").onclick=detectModules;
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
+$("#modenrich").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
