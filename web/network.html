@@ -437,6 +437,7 @@ function load(g){
   if(q.get("sim")||q.get("relayout")){ startSim(); }
   if(q.get("pie")){ propStyle="pie"; $("#propstyle")?.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v==="pie")); }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
+  if(q.get("pathmode")) pathMode=q.get("pathmode");
   if(q.get("select")){ const ids=q.get("select").split(",").map(s=>idx[s.trim()]).filter(j=>j!=null);
     if(ids.length){ selected=new Set(ids);
       if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); }
@@ -1067,21 +1068,42 @@ function inspect(i, pinned){
 }
 
 // ---------- selection + node actions ----------
-let pathNodes=[], pathEdgeSet=new Set();
-// shortest path (fewest hops) between the two selected nodes over the VISIBLE graph
+let pathNodes=[], pathEdgeSet=new Set(), pathEcorrs=[], pathMode="hops";
+// minimal binary min-heap (priority, item)
+function Heap(){ this.a=[]; }
+Heap.prototype.push=function(it,p){ const a=this.a; a.push([p,it]); let i=a.length-1;
+  while(i>0){ const q=(i-1)>>1; if(a[q][0]<=a[i][0])break; [a[q],a[i]]=[a[i],a[q]]; i=q; } };
+Heap.prototype.pop=function(){ const a=this.a, top=a[0], last=a.pop();
+  if(a.length){ a[0]=last; let i=0; const n=a.length;
+    for(;;){ let l=2*i+1,r=l+1,m=i; if(l<n&&a[l][0]<a[m][0])m=l; if(r<n&&a[r][0]<a[m][0])m=r; if(m===i)break; [a[m],a[i]]=[a[i],a[m]]; i=m; } }
+  return top; };
+Heap.prototype.size=function(){ return this.a.length; };
+// Dijkstra over the VISIBLE graph; weighted → edge cost 1/|ecorr| (route through
+// strong correlations), else unit cost (fewest hops).
+function dijkstra(s,t,weighted){
+  const adj={};
+  for(const e of VIS.edges){ const w=weighted? 1/Math.max(1e-6,Math.abs(e.ecorr)) : 1;
+    (adj[e.a]=adj[e.a]||[]).push([e.b,w]); (adj[e.b]=adj[e.b]||[]).push([e.a,w]); }
+  const dist={}, prev={}, done=new Set(), h=new Heap(); dist[s]=0; h.push(s,0);
+  while(h.size()){ const [d,u]=h.pop(); if(done.has(u))continue; done.add(u); if(u===t)break;
+    for(const [v,w] of (adj[u]||[])){ const nd=d+w; if(dist[v]==null||nd<dist[v]){ dist[v]=nd; prev[v]=u; h.push(v,nd); } } }
+  if(dist[t]==null) return null;
+  const path=[]; let c=t; while(c!==undefined){ path.push(c); if(c===s)break; c=prev[c]; }
+  return path.reverse();
+}
+// shortest path between the two selected nodes over the VISIBLE graph
 function computePath(){
-  pathNodes=[]; pathEdgeSet=new Set();
+  pathNodes=[]; pathEdgeSet=new Set(); pathEcorrs=[];
   if(selected.size!==2) return;
   const [s,t]=[...selected];
-  const adj={}; for(const e of VIS.edges){ (adj[e.a]=adj[e.a]||[]).push(e.b); (adj[e.b]=adj[e.b]||[]).push(e.a); }
-  const prev={}, seen=new Set([s]); const q=[s]; let found=false;
-  while(q.length){ const u=q.shift(); if(u===t){found=true;break;}
-    for(const v of (adj[u]||[])) if(!seen.has(v)){ seen.add(v); prev[v]=u; q.push(v); } }
-  if(!found) return;
-  const path=[]; let c=t; while(c!==undefined){ path.push(c); if(c===s) break; c=prev[c]; }
-  path.reverse(); pathNodes=path;
-  for(let i=0;i+1<path.length;i++){ const a=path[i],b=path[i+1]; pathEdgeSet.add(a<b?a+"|"+b:b+"|"+a); }
+  const path=dijkstra(s,t, pathMode==="strength");
+  if(!path) return;
+  pathNodes=path;
+  const ec={}; for(const e of VIS.edges) ec[e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a]=e.ecorr;
+  for(let i=0;i+1<path.length;i++){ const a=path[i],b=path[i+1], key=a<b?a+"|"+b:b+"|"+a;
+    pathEdgeSet.add(key); pathEcorrs.push(ec[key]); }
 }
+function setPathMode(m){ pathMode=m; showInfo(); render(); }
 function selRepr(){ return selected.size ? [...selected][0] : -1; }
 function selectNode(i, additive){
   if(additive){ selected.has(i)?selected.delete(i):selected.add(i); }
@@ -1099,12 +1121,20 @@ function showInfo(){
 function inspectMulti(){
   let path="";
   if(selected.size===2){
-    path = pathNodes.length>1
-      ? `<div class="kv"><span class="k">shortest path</span><b>${pathNodes.length-1} hops</b></div>`+
-        `<div class="nbrs" style="margin-top:4px">`+pathNodes.map(i=>
+    const toggle=`<div class="seg" style="margin:8px 0 4px">`+
+      `<button onclick="setPathMode('hops')" class="${pathMode==='hops'?'on':''}">fewest hops</button>`+
+      `<button onclick="setPathMode('strength')" class="${pathMode==='strength'?'on':''}">strongest</button></div>`;
+    if(pathNodes.length>1){
+      const absE=pathEcorrs.map(Math.abs).filter(v=>isFinite(v));
+      const mean=absE.length?absE.reduce((a,b)=>a+b,0)/absE.length:0;
+      const minE=absE.length?Math.min(...absE):0;
+      path=toggle+
+        `<div class="kv"><span class="k">path</span><b>${pathNodes.length-1} hops · x̄|ecorr| ${mean.toFixed(2)} · min ${minE.toFixed(2)}</b></div>`+
+        `<div class="nbrs" style="margin-top:4px">`+pathNodes.map((i,k)=>
           `<div class="nbr" onclick="selectNode(${i},false)"><span class="dot" style="background:${colorOf(nodes[i])}"></span>`+
-          `<span class="nm">${nodes[i].id} <i>${nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||'')}</i></span></div>`).join("")+`</div>`
-      : `<div class="hint" style="margin-top:6px">No path between them in the current (filtered) view.</div>`;
+          `<span class="nm">${nodes[i].id} <i>${nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||'')}</i></span>`+
+          `${k<pathEcorrs.length?`<b style="color:${pathEcorrs[k]<0?COL.neg:COL.pos}">${pathEcorrs[k]>=0?'+':''}${(+pathEcorrs[k]).toFixed(2)}</b>`:''}</div>`).join("")+`</div>`;
+    } else path=toggle+`<div class="hint" style="margin-top:6px">No path between them in the current (filtered) view.</div>`;
   }
   $("#inspect").innerHTML=`<h2>${selected.size} nodes selected</h2>`+
     `<div class="acts"><button class="primary" onclick="focusSel()">Focus selection</button>`+

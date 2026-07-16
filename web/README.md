@@ -86,8 +86,9 @@ graphs:
   shows/clears it; **Expand +1** grows it), **Select <phylum>** (all same-taxon
   nodes), **Copy** (info to clipboard), **Export ⬇** (the ego-network as a
   `graph.json`). Select **two** nodes → the **shortest path** between them (fewest
-  hops over the visible graph) is highlighted on the canvas and listed with
-  taxonomy. Deep-link: `?select=<id>[,<id2>]&focus=1`.
+  hops, or the **strongest** correlation route — Dijkstra on `1/|ecorr|`) is
+  highlighted on the canvas and listed with per-step `ecorr` and mean/min |ecorr|.
+  Deep-link: `?select=<id>[,<id2>]&pathmode=hops|strength&focus=1`.
 - **Edge filters** — min `|ecorr|`, sign (both ± / positive / negative), min
   presence score, keep top-N by `|ecorr|`, and min node degree. All live, and
   compose with the ego-network focus.
