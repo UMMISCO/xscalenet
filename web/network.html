@@ -1392,27 +1392,36 @@ $("#exportmenu").onclick=e=>{ const x=e.target.dataset?.x; if(!x)return;
   ({png:exportPNG, nodes:exportNodesCSV, edges:exportEdgesCSV, graph:exportGraphJSON})[x]?.(); };
 
 // ---------- node search ----------
-let searchHits=[], searchHot=-1;
+let searchHits=[], searchHot=-1, searchAll=[];
 function runSearch(q){
   q=(q||"").trim().toLowerCase(); const box=$("#searchresults");
-  if(!q){ box.classList.remove("open"); searchHits=[]; return; }
+  if(!q){ box.classList.remove("open"); searchHits=[]; searchAll=[]; return; }
   const scored=[];
   for(const n of nodes){ const id=n.id.toLowerCase(); let s=-1;
     if(id===q) s=0; else if(id.startsWith(q)) s=1; else if(id.includes(q)) s=2;
     else for(const k in n){ if(typeof n[k]==="string" && k!=="color" && n[k].toLowerCase().includes(q)){ s=3; break; } }
     if(s>=0) scored.push([s,n.i]); }
   scored.sort((a,b)=>a[0]-b[0] || (VIS.deg[b[1]]||0)-(VIS.deg[a[1]]||0));
-  searchHits=scored.slice(0,12).map(x=>x[1]); searchHot=searchHits.length?0:-1;
+  searchAll=scored.map(x=>x[1]); searchHits=searchAll.slice(0,12); searchHot=searchHits.length?0:-1;
   renderSearch();
 }
 function renderSearch(){
   const box=$("#searchresults");
   if(!searchHits.length){ box.innerHTML='<div class="none">No match.</div>'; box.classList.add("open"); return; }
-  box.innerHTML=searchHits.map((i,k)=>{ const n=nodes[i], sub=(n.genus&&n.genus!=='NA')?n.genus:(n.family||n.phylum||n.label||'');
+  const head = searchAll.length>1
+    ? `<div class="r selall" style="border-bottom:1px solid var(--line2)" onclick="selectAllMatches()"><span class="dot" style="background:var(--accent)"></span><span><b>Select all ${searchAll.length} matches</b></span></div>` : "";
+  box.innerHTML=head+searchHits.map((i,k)=>{ const n=nodes[i], sub=(n.genus&&n.genus!=='NA')?n.genus:(n.family||n.phylum||n.label||'');
     return `<div class="r ${k===searchHot?'hot':''}" data-i="${i}"><span class="dot" style="background:${colorOf(n)}"></span>`+
-      `<span>${n.id} <i>${sub}</i></span></div>`; }).join("");
+      `<span>${n.id} <i>${sub}</i></span></div>`; }).join("")+
+    (searchAll.length>12?`<div class="none">+${searchAll.length-12} more — use “Select all”.</div>`:"");
   box.classList.add("open");
-  box.querySelectorAll(".r").forEach(r=>r.onclick=()=>gotoNode(+r.dataset.i));
+  box.querySelectorAll(".r[data-i]").forEach(r=>r.onclick=()=>gotoNode(+r.dataset.i));
+}
+function selectAllMatches(){
+  if(!searchAll.length) return;
+  selected=new Set(searchAll); focus=null; focusKey=""; focusLabel="";
+  $("#searchresults").classList.remove("open"); $("#search").value=""; $("#search").blur();
+  apply(); showInfo(); updateFocusChip();
 }
 function centerOn(i){ const n=nodes[i], W=stageW(), H=stageH();
   view.k=Math.max(view.k,4); view.x=W/2-n.x*view.k; view.y=H/2-n.y*view.k; render(); }
