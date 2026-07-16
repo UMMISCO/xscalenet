@@ -43,8 +43,17 @@ graphs:
 
 - **Colour by taxonomy / annotation** — a dropdown over any categorical node
   field (phylum, family, …) with a click-to-toggle legend.
+- **Select a node & act on it** — click a node to *pin* it (Shift/⌘-click for
+  multi-select; click empty / Esc to clear). The Node panel then shows its full
+  taxonomy, degree, ATC, and a **signed partner list** (neighbours sorted by
+  `ecorr`, + co-occurring / − mutually-excluding), each clickable. Actions:
+  **Focus ego-network** (isolate the node + its neighbours — a floating chip
+  shows/clears it; **Expand +1** grows it), **Select <phylum>** (all same-taxon
+  nodes), **Copy** (info to clipboard), **Export ⬇** (the ego-network as a
+  `graph.json`). Deep-link: `?select=<id>&focus=1`.
 - **Edge filters** — min `|ecorr|`, sign (both ± / positive / negative), min
-  presence score, keep top-N by `|ecorr|`, and min node degree. All live.
+  presence score, keep top-N by `|ecorr|`, and min node degree. All live, and
+  compose with the ego-network focus.
 - **Scale-free topology** — fits the degree distribution to a power law
   `P(k) ~ k^−γ` (log-log linear regression), reports **γ, R², k_max**, judges it
   against the scale-free criteria (Barabási's 2 ≤ γ ≤ 3; WGCNA's R² ≥ 0.80), and
