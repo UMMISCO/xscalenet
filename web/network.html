@@ -744,10 +744,14 @@ function hexToRgb(h){ h=(h||"#888").replace('#',''); if(h.length===3) h=h.split(
 function propColor(i){
   const row=trace[prop.step]?.config?.[i]; if(!row) return COL.muted;
   const tot=row.reduce((a,b)=>a+b,0);
-  // A node with no theme mass at this step (unannotated, or a peripheral node
-  // that has shed its mass to the connected core under column renormalization) is
-  // drawn a clear grey — "no annotation here" — not near-white (which read as gone).
-  if(tot<=1e-12) return "#b9c0cb";
+  // Underflow: a peripheral/isolated node's absolute mass is drained to the core
+  // by the GLOBAL per-theme renormalisation, even though its own composition is
+  // stable. Don't let its colour vanish — fall back to its annotation (theme)
+  // colour. Only genuinely unannotated nodes go grey.
+  if(tot<=1e-12){
+    const pg=nodes[i].phylum_group||nodes[i].phylum;
+    return (pg && G.themes && G.themes.includes(pg)) ? taxColor(pg) : "#b9c0cb";
+  }
   let r=0,g=0,b=0; for(let j=0;j<row.length;j++){ const w=row[j]/tot;
     r+=w*themeRGB[j][0]; g+=w*themeRGB[j][1]; b+=w*themeRGB[j][2]; }
   return `rgb(${r|0},${g|0},${b|0})`;
