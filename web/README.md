@@ -101,8 +101,10 @@ graphs:
   available.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a
   play/scrub timeline animates the annotation propagation *on the real network*:
-  each node's colour blends its evolving theme mix `Tᵖ`, with the per-step
-  co-inertia readout. "off" restores the taxonomy colour.
+  node **size** grows with the ATC accrued so far, and node **colour** shows the
+  evolving theme mix `Tᵖ` — either a **colour blend** or a **pie chart** per node
+  (toggle) — with the per-step co-inertia. Only applies the theme colouring when
+  you're colouring by the annotation; any other colouring (e.g. module) is kept.
 - Hover for taxonomy + degree + ATC; drag nodes, pan the background, and zoom by
   scroll, **two-finger pinch** (trackpad or touch), or Safari pinch gesture.
 

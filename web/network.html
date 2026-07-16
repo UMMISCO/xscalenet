@@ -203,6 +203,10 @@
         <input type="range" id="propscrub" min="0" max="0" value="0" step="1" style="flex:1">
         <span class="lh" style="min-width:56px;text-align:right"><b id="propstep">off</b></span>
       </div>
+      <div class="seg" id="propstyle" style="margin-top:8px">
+        <button data-v="blend" class="on">colour blend</button>
+        <button data-v="pie">pie charts</button>
+      </div>
       <div class="rec" id="propinfo" style="margin-top:8px"></div>
     </div>
 
@@ -271,6 +275,7 @@ let sizeBy="degree", sizeMax={};
 // ATC propagation trace (present when the graph was enriched with graph_atc)
 let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
 let runAtc=null;  // running dist·co-inertia ATC per step (accumulates to final atc)
+let propStyle="blend";   // "blend" (solid mixed colour) or "pie" (theme pie chart)
 // taxonomic-layer aggregation: the full species-level graph + current rank
 let baseGraph=null, layerRank="species";
 const RANKS=["species","genus","family","order","class","phylum"];
@@ -409,6 +414,7 @@ function load(g){
   if(q.get("layout") && $("#layout2").querySelector(`[value=${CSS.escape(q.get("layout"))}]`)){
     $("#layout2").value=q.get("layout"); applyLayout(q.get("layout")); }
   if(q.get("sim")||q.get("relayout")){ startSim(); }
+  if(q.get("pie")){ propStyle="pie"; $("#propstyle")?.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v==="pie")); }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   if(q.get("select") && idx[q.get("select")]!=null){ selected=new Set([idx[q.get("select")]]);
     if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); } apply(); }
@@ -756,6 +762,19 @@ function propColor(i){
     r+=w*themeRGB[j][0]; g+=w*themeRGB[j][1]; b+=w*themeRGB[j][2]; }
   return `rgb(${r|0},${g|0},${b|0})`;
 }
+// draw node i as a pie chart of its theme weights Tᵖ at radius r (canvas, in the
+// current scaled transform). Zero-mass → solid fallback like propColor.
+function drawPie(cx,cy,r,row,i){
+  const tot=row.reduce((a,b)=>a+b,0);
+  if(tot<=1e-12){ CTX.beginPath(); CTX.arc(cx,cy,r,0,7); CTX.fillStyle=propColor(i); CTX.fill(); return; }
+  let ang=-Math.PI/2;
+  for(let j=0;j<row.length;j++){ if(row[j]<=1e-12) continue;
+    const a2=ang+2*Math.PI*(row[j]/tot);
+    CTX.beginPath(); CTX.moveTo(cx,cy); CTX.arc(cx,cy,r,ang,a2); CTX.closePath();
+    CTX.fillStyle=`rgb(${themeRGB[j][0]},${themeRGB[j][1]},${themeRGB[j][2]})`; CTX.fill();
+    ang=a2;
+  }
+}
 function render(){
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
@@ -780,7 +799,13 @@ function render(){
     const on = !nbr || nbr.has(n.i);
     const r=radiusOf(n.i)/view.k;   // screen-constant node size (zoom-independent)
     CTX.globalAlpha=on?1:0.12;
-    CTX.beginPath(); CTX.arc(n.x,n.y,r,0,7); CTX.fillStyle=colorOf(n); CTX.fill();
+    // during propagation (coloured by the annotation) draw a pie of the theme mix
+    // when "pie charts" is chosen; otherwise a solid (blended / chosen) fill.
+    if(prop.step!=null && propStyle==="pie" && colorField===(G.atc_trace&&G.atc_trace.annotation) && trace[prop.step]?.config?.[n.i]){
+      drawPie(n.x,n.y,r,trace[prop.step].config[n.i], n.i);
+    } else {
+      CTX.beginPath(); CTX.arc(n.x,n.y,r,0,7); CTX.fillStyle=colorOf(n); CTX.fill();
+    }
     if(selected.has(n.i)){ CTX.lineWidth=2.6/view.k; CTX.strokeStyle=COL.accent; CTX.stroke();
       CTX.beginPath(); CTX.arc(n.x,n.y,r+3/view.k,0,7); CTX.lineWidth=1/view.k; CTX.stroke(); }
     else if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
@@ -1091,6 +1116,9 @@ function setProp(s){
 }
 $("#propscrub").oninput=e=>{ if(prop.playing) playProp(); setProp(+e.target.value); };
 $("#propplay").onclick=()=>playProp();
+$("#propstyle").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  $("#propstyle").querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); propStyle=b.dataset.v; render(); });
 function playProp(){
   prop.playing=!prop.playing; $("#propplay").textContent=prop.playing?"❚❚":"▶";
   if(prop.playing){ if(prop.step==null) setProp(0); tickProp(); } else clearTimeout(prop.timer);
