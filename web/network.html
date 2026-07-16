@@ -230,8 +230,11 @@
 
     <div class="sec" id="subgsec" style="display:none">
       <h2>Spectral subgraphs <span class="hint" id="subgnote"></span></h2>
-      <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”. Scrub to isolate each.</div>
-      <div class="trow" style="display:flex;align-items:center;gap:8px;margin-top:9px">
+      <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”.</div>
+      <button class="btn" id="subgcov" style="width:100%;margin-top:9px;justify-content:center">Overlap heatmap (coverage)</button>
+      <div id="covlegend"></div>
+      <div class="hint" style="margin-top:9px">…or isolate one subgraph:</div>
+      <div class="trow" style="display:flex;align-items:center;gap:8px;margin-top:6px">
         <button class="btn" id="subgprev" style="padding:5px 9px">‹</button>
         <input type="range" id="subgscrub" min="0" max="0" value="0" step="1" style="flex:1">
         <button class="btn" id="subgnext" style="padding:5px 9px">›</button>
@@ -321,6 +324,28 @@ let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
 let focusLabel="", focusKey="";   // human label + identity of the current focus
 let subgraphs=[], subgIdx=-1;     // spectral subgraphs (each = {eigenvector,sign,nodes:[idx]})
+// subgraph-coverage heatmap: how many subgraphs project onto each node/edge
+let covMode=false, covBits=null, covW=0, nodeCov=null, maxNodeCov=1, maxEdgeCov=1;
+const VIRIDIS=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+function heat(t){ t=Math.max(0,Math.min(1,t||0)); const s=t*(VIRIDIS.length-1), i=Math.min(VIRIDIS.length-2,Math.floor(s)), f=s-i;
+  const a=VIRIDIS[i], b=VIRIDIS[i+1];
+  return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`; }
+function popcnt(x){ x=x-((x>>>1)&0x55555555); x=(x&0x33333333)+((x>>>2)&0x33333333); x=(x+(x>>>4))&0x0f0f0f0f; return (x*0x01010101)>>>24; }
+function toggleCoverage(){
+  if(covMode){ covMode=false; $("#subgcov").classList.remove("primary"); $("#covlegend").innerHTML=""; buildColors(); apply(); return; }
+  if(!subgraphs.length) return;
+  covW=Math.ceil(subgraphs.length/32);
+  covBits=Array.from({length:nodes.length},()=>new Uint32Array(covW));
+  subgraphs.forEach((sg,j)=>{ const w=j>>5, m=1<<(j&31); for(const i of sg.nodes){ if(i>=0&&i<nodes.length) covBits[i][w]|=m; } });
+  nodeCov=nodes.map((n,i)=>{ let c=0; for(let w=0;w<covW;w++) c+=popcnt(covBits[i][w]); return c; });
+  maxNodeCov=Math.max(1,...nodeCov); maxEdgeCov=1;
+  for(const e of edges){ let c=0; for(let w=0;w<covW;w++) c+=popcnt(covBits[e.a][w]&covBits[e.b][w]); e.__cov=c; if(c>maxEdgeCov)maxEdgeCov=c; }
+  covMode=true; $("#subgcov").classList.add("primary");
+  const stops=[0,.25,.5,.75,1].map(t=>heat(t)).join(",");
+  $("#covlegend").innerHTML=`<div class="hint" style="margin-top:8px">node/edge coverage — # subgraphs projecting here (0 → ${maxNodeCov})</div>`+
+    `<div style="height:10px;border-radius:5px;margin-top:4px;background:linear-gradient(90deg,${stops})"></div>`;
+  render();
+}
 let down=null;            // pointer-down bookkeeping (to tell a click from a drag)
 let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
 let sizeBy="degree", sizeMax={};
@@ -478,6 +503,7 @@ function load(g){
   setupSubgraphs();
   if(q.get("modules")) detectModules();
   if(q.get("subg")!=null && subgraphs.length) focusSubgraph(+q.get("subg"));
+  if(q.get("cov") && subgraphs.length) toggleCoverage();
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
@@ -503,6 +529,7 @@ function buildColors(){
 function legendNodes(){ return colorField==="module" ? nodes.filter(n=>VIS.visN.has(n.i)) : nodes; }
 function groupOf(n){ return n[colorField]||"NA"; }
 function colorOf(n){
+  if(covMode && nodeCov) return heat(nodeCov[n.i]/maxNodeCov);   // subgraph-coverage heatmap
   // During propagation, blend by the theme mix ONLY when colouring by the ATC
   // annotation itself; otherwise (module, family, …) keep the chosen colour so
   // it isn't overwritten — only the node size animates.
@@ -916,6 +943,7 @@ function focusSubgraph(j){
 }
 function setupSubgraphs(){
   subgraphs=(G.subgraphs||[]); subgIdx=-1;
+  covMode=false; nodeCov=null; $("#subgcov").classList.remove("primary"); $("#covlegend").innerHTML="";
   const sec=$("#subgsec");
   if(subgraphs.length){ sec.style.display="";
     $("#subgnote").textContent=`${subgraphs.length} · k=${G.meta?.k??"?"}`;
@@ -993,6 +1021,9 @@ function render(){
     }
     // highlight only the induced subgraph — BOTH endpoints in the neighbourhood.
     const on = !nbr || (nbr.has(e.a) && nbr.has(e.b));
+    if(covMode){ const t=(e.__cov||0)/maxEdgeCov;
+      CTX.globalAlpha=on?(0.25+0.6*t):0.04; CTX.strokeStyle=heat(t); CTX.lineWidth=(0.4+2.6*t)/view.k;
+      CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue; }
     CTX.globalAlpha = on?(nbr?0.9:0.5):0.05;
     CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
     CTX.lineWidth = (e.weight ? Math.min(5, 0.6+e.weight*0.5) : 0.8)/view.k; // width ∝ #edges (layer mode)
@@ -1435,6 +1466,7 @@ function tickProp(){ if(!prop.playing) return;
 $("#layout2").onchange=e=>applyLayout(e.target.value);
 $("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) startSim(); };
+$("#subgcov").onclick=toggleCoverage;
 $("#subgscrub").oninput=e=>focusSubgraph(+e.target.value);
 $("#subgprev").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.max(0,(subgIdx<0?0:subgIdx-1))); };
 $("#subgnext").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.min(subgraphs.length-1,(subgIdx<0?0:subgIdx+1))); };
