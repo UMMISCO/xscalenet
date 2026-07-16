@@ -16,8 +16,8 @@ path = "src/bin/web.rs"
 required-features = ["web"]
 
 [features]
-# `xscalenet-web` server: axum + tokio + static file serving.
-web = ["dep:axum", "dep:tokio", "dep:tower-http"]
+# `xscalenet-web` server: axum + tokio + static file serving + JSON building.
+web = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde_json"]
 
 [dependencies]
 nalgebra = "0.33"
@@ -28,6 +28,7 @@ flate2 = "1"
 axum = { version = "0.7", features = ["multipart"], optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"], optional = true }
 tower-http = { version = "0.6", features = ["fs"], optional = true }
+serde_json = { version = "1", optional = true }
 
 [dev-dependencies]
 # Only used by the `graph_atc` example to read/enrich an existing graph.json.
