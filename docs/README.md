@@ -22,7 +22,10 @@ embedded reconstruction methods into one robust network.
    package, what is faithfully reproduced, and what is intentionally out of scope.
 4. **[integration.md](integration.md)** — the library API (`run`/`analyze`) and the
    `graph.json` interchange format for a web frontend / IntegraNet.
-5. **[performance.md](performance.md)** — the cost model per stage, the known
+5. **[suite.md](suite.md)** — the IntegraNet platform: how the components
+   (scalenet · xscalenet · xscalenet-web · web apps) fit together, and the
+   **formal `graph.json` exchange-format spec** that lets them interoperate.
+6. **[performance.md](performance.md)** — the cost model per stage, the known
    bottlenecks, and the optimization direction.
 
 ## Quick start

@@ -4,6 +4,10 @@ xscalenet is usable as a **library** and produces a **self-contained JSON graph*
 so a web frontend, notebook, or the IntegraNet app can consume its output without
 re-parsing edge-list files.
 
+> The **full, current `graph.json` spec** (colour map, themes, per-node metrics,
+> `atc_trace`, layout) and how the suite fits together live in
+> [suite.md](suite.md). The sketch below covers the library entry points.
+
 ## Python bindings
 
 In-process bindings expose `reconstruct(input, ...)` returning the JSON below;
