@@ -545,11 +545,34 @@ function apply(){
   else if(autoFlow) startSim();         // opt-in: start the live sim on first filter change
 }
 
+// components / mean degree / density / transitivity of the VISIBLE graph
+function graphStats(){
+  const V=[...VIS.visN], nV=V.length, nE=VIS.edges.length;
+  const par={}; V.forEach(i=>par[i]=i);
+  const find=x=>{ while(par[x]!==x){ par[x]=par[par[x]]; x=par[x]; } return x; };
+  for(const e of VIS.edges){ const a=find(e.a),b=find(e.b); if(a!==b) par[a]=b; }
+  const size={}; V.forEach(i=>{ const r=find(i); size[r]=(size[r]||0)+1; });
+  const comps=Object.keys(size).length, largest=nV?Math.max(...Object.values(size)):0;
+  const meanDeg=nV?2*nE/nV:0, density=nV>1?2*nE/(nV*(nV-1)):0;
+  let trans=null;
+  if(nE<40000){
+    const adj={}; for(const e of VIS.edges){ (adj[e.a]=adj[e.a]||new Set()).add(e.b); (adj[e.b]=adj[e.b]||new Set()).add(e.a); }
+    let closed=0, triples=0;
+    for(const i of V){ const nb=[...(adj[i]||[])], d=nb.length; triples+=d*(d-1)/2;
+      for(let a=0;a<d;a++) for(let b=a+1;b<d;b++){ if(adj[nb[a]].has(nb[b])) closed++; } }
+    trans=triples? closed/triples : 0;   // closed = 3×triangles; triples = length-2 paths
+  }
+  return {comps, largest, meanDeg, density, trans};
+}
 function drawStats(){
-  const g=G.meta||{};
+  const g=G.meta||{}, s=graphStats();
   $("#stats").innerHTML=
     kv("nodes shown", `${VIS.visN.size} <span class="k">/ ${nodes.length}</span>`)+
     kv("edges shown", `${VIS.edges.length} <span class="k">/ ${edges.length}</span>`)+
+    kv("components", `${s.comps} <span class="k">(max ${s.largest})</span>`)+
+    kv("mean degree", s.meanDeg.toFixed(1))+
+    kv("density", s.density.toFixed(3))+
+    (s.trans!=null?kv("clustering", s.trans.toFixed(3)):"")+
     (g.directed!=null?kv("directed", g.directed?"yes":"no"):"")+
     kv("colour groups", groups.length);
 }
