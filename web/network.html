@@ -183,6 +183,7 @@
   </div>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
   <button class="btn" id="sim" title="Run a live force simulation that re-flows the layout as you filter">⚛ Simulate</button>
+  <button class="btn" id="resetbtn" title="Reset the analysis — clear filters, layout, selection and view, back to the initial network">↺ Reset</button>
 </header>
 
 <div id="app">
@@ -320,6 +321,7 @@ const CV=$("#cv"), CTX=CV.getContext("2d");
 const SF=$("#sf"), SFX=SF.getContext("2d");
 let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
 let view={x:0,y:0,k:1}, dpr=1, hot=-1, hotEdge=null, dragging=null, panning=null, offGroups=new Set();
+let stateKey="net", restoring=true, saveTimer=0;   // persist analysis across refreshes
 let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
 let focusLabel="", focusKey="";   // human label + identity of the current focus
@@ -369,7 +371,7 @@ function readColors(){
 // ---------- taxonomic layer aggregation ----------
 function loadBase(g){
   baseGraph=g;
-  const q=new URLSearchParams(location.search);
+  const q=getParams();
   layerRank = (q.get("layer") && RANKS.includes(q.get("layer"))) ? q.get("layer") : "species";
   const present=RANKS.filter(r=> r==="species" || (g.nodes||[]).some(n=>n[r]));
   $("#layer").innerHTML=present.map(r=>`<option value="${r}">${r==="species"?"species (full)":r}</option>`).join("");
@@ -405,6 +407,62 @@ function aggregate(g, rank){
       source:`${nodes.length} ${rank}-level taxa · edge = between-taxa links (width ∝ #species-edges)`,
       directed:false, color_by:"phylum_group" },
     color_groups:g.color_groups, color_map:g.color_map, nodes, edges };
+}
+
+// ---------- state persistence (survive refresh + shareable URL) ----------
+// The full analysis (filters, colouring, layout, sim, modules, subgraph focus,
+// coverage, propagation step, selection, pan/zoom + exact node positions) is
+// mirrored into the URL query and localStorage keyed by the loaded graph, so a
+// plain refresh restores it "au bon endroit". Reset (↺) wipes it.
+function getParams(){
+  let qs=location.search.slice(1);
+  if(!qs){ try{ qs=localStorage.getItem("xsnet:q:"+stateKey)||""; }catch(e){} }
+  return new URLSearchParams(qs);
+}
+function buildParams(){
+  const p=new URLSearchParams(), set=(k,v)=>{ if(v!==""&&v!=null) p.set(k,v); };
+  if(layerRank&&layerRank!=="species") set("layer",layerRank);
+  if(colorField&&colorField!==(G&&G.meta&&G.meta.color_by)) set("colorby",colorField);
+  if(sizeBy&&sizeBy!=="degree") set("sizeby",sizeBy);
+  if(currentLayout) set("layout",currentLayout);
+  if(filt.sign&&filt.sign!=="all") set("sign",filt.sign);
+  const ecEl=$("#ec"); if(ecEl&&+ecEl.value>+ecEl.min) set("ec",(+ecEl.value).toFixed(3));
+  if(filt.sc>0) set("sc",filt.sc);
+  const tnEl=$("#tn"); if(tnEl&&+tnEl.value<+tnEl.max) set("tn",tnEl.value);
+  if(filt.md>0) set("md",filt.md);
+  if(offGroups.size) set("off",[...offGroups].join("~"));
+  if(sim.on) set("sim","1");
+  if(colorField==="module") set("modules","1");
+  if(subgIdx>=0) set("subg",subgIdx);
+  if(covMode) set("cov","1");
+  if(prop.step!=null) set("prop",prop.step);
+  if(propStyle==="pie") set("pie","1");
+  const fv=$("#search")&&$("#search").value.trim(); if(fv) set("find",fv);
+  if(pathMode&&pathMode!=="hops") set("pathmode",pathMode);
+  if(selected.size) set("select",[...selected].map(i=>nodes[i]&&nodes[i].id).filter(Boolean).join(","));
+  if(focusKey==="ego") set("focus","1");
+  set("view",[view.x,view.y,view.k].map(v=>+(+v).toFixed(2)).join(","));
+  return p;
+}
+function persist(){
+  if(restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{
+    const qs=buildParams().toString();
+    try{ history.replaceState(null,"", qs?("?"+qs):location.pathname); }catch(e){}
+    try{ localStorage.setItem("xsnet:q:"+stateKey, qs);
+      const pos=new Array(nodes.length*2);
+      for(let i=0;i<nodes.length;i++){ pos[2*i]=+nodes[i].x.toFixed(2); pos[2*i+1]=+nodes[i].y.toFixed(2); }
+      localStorage.setItem("xsnet:pos:"+stateKey+":"+layerRank, JSON.stringify(pos));
+    }catch(e){}
+  }, 500);
+}
+function resetState(){
+  try{ localStorage.removeItem("xsnet:q:"+stateKey);
+    for(const r of RANKS) localStorage.removeItem("xsnet:pos:"+stateKey+":"+r);
+  }catch(e){}
+  const g=new URLSearchParams(location.search).get("graph");
+  location.href=location.pathname+(g?("?graph="+encodeURIComponent(g)):"");
 }
 
 // ---------- load ----------
@@ -480,12 +538,18 @@ function load(g){
   $("#layout2").innerHTML=layoutOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
   currentLayout=hasFixedLayout?"igraph":"force"; $("#layout2").value=currentLayout;
   if(hasFixedLayout) fitView(); else { seedLayout(); relax(300); }
-  // optional shareable view: ?ec=0.4&sign=pos&colorby=phylum
-  const q=new URLSearchParams(location.search);
+  // restore saved / shared view: ?ec=0.4&sign=pos&colorby=phylum (URL wins over
+  // localStorage; see getParams)
+  restoring=true;
+  const q=getParams();
   if(q.get("colorby")){ colorField=q.get("colorby"); $("#colorby").value=colorField; buildColors(); }
   if(q.get("sign")){ filt.sign=q.get("sign");
     $("#sign").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===filt.sign)); }
   if(q.get("ec")!=null){ const ec=$("#ec"); ec.value=q.get("ec"); filt.ec=+ec.value; }
+  if(q.get("sc")!=null){ const sc=$("#sc"); sc.value=q.get("sc"); filt.sc=+sc.value; }
+  if(q.get("tn")!=null){ const tn=$("#tn"); tn.value=q.get("tn"); filt.topN=+tn.value/edges.length; }
+  if(q.get("md")!=null){ const md=$("#md"); md.value=q.get("md"); filt.md=+md.value; }
+  if(q.get("off")) offGroups=new Set(q.get("off").split("~").filter(Boolean));
   if(q.get("sizeby")){ sizeBy=q.get("sizeby"); $("#sizeby").value=sizeBy; }
   syncLabels(); apply();
   if(q.get("layout") && $("#layout2").querySelector(`[value=${CSS.escape(q.get("layout"))}]`)){
@@ -504,10 +568,21 @@ function load(g){
   if(q.get("modules")) detectModules();
   if(q.get("subg")!=null && subgraphs.length) focusSubgraph(+q.get("subg"));
   if(q.get("cov") && subgraphs.length) toggleCoverage();
+  // exact saved layout (sim/drag positions) — keyed per graph+rank; then the
+  // saved pan/zoom, so the analysis reloads exactly where it was left.
+  try{ const raw=localStorage.getItem("xsnet:pos:"+stateKey+":"+layerRank);
+    if(raw && !location.search.slice(1)){ const pos=JSON.parse(raw);
+      if(Array.isArray(pos) && pos.length===nodes.length*2){
+        for(let i=0;i<nodes.length;i++){ nodes[i].x=pos[2*i]; nodes[i].y=pos[2*i+1]; } } }
+  }catch(e){}
+  if(q.get("view")){ const v=q.get("view").split(",").map(Number);
+    if(v.length===3 && v.every(isFinite)){ view.x=v[0]; view.y=v[1]; view.k=v[2]; } }
+  render();
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
   updateFocusChip(); showInfo();
+  restoring=false;   // from here on, user interactions persist
 }
 
 function buildColors(){
@@ -585,6 +660,7 @@ function apply(){
   drawStats(); render(); scaleFree();
   if(sim.on) reheat(0.55);              // live layout re-flows to the new filtered set
   else if(autoFlow) startSim();         // opt-in: start the live sim on first filter change
+  persist();
 }
 
 // components / mean degree / density / transitivity of the VISIBLE graph
@@ -1003,6 +1079,7 @@ function drawPie(cx,cy,r,row,i){
   }
 }
 function render(){
+  persist();   // debounced; captures pan/zoom, size-by, sim/drag positions
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
   // emphasis: a shortest path (2 selected) > pinned selection ego > hover.
@@ -1466,6 +1543,7 @@ function tickProp(){ if(!prop.playing) return;
 $("#layout2").onchange=e=>applyLayout(e.target.value);
 $("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) startSim(); };
+$("#resetbtn").onclick=resetState;
 $("#subgcov").onclick=toggleCoverage;
 $("#subgscrub").oninput=e=>focusSubgraph(+e.target.value);
 $("#subgprev").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.max(0,(subgIdx<0?0:subgIdx-1))); };
@@ -1529,7 +1607,7 @@ $("#search").onkeydown=e=>{
   else if(e.key==="Escape"){ e.stopPropagation(); $("#searchresults").classList.remove("open"); e.target.value=""; searchHits=[]; e.target.blur(); }
 };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
-  const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
+  const rd=new FileReader(); rd.onload=()=>{ try{ resize(); stateKey="file:"+f.name; loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
 
 // ---------- import: raw matrix -> reconstruction via xscalenet-web ----------
@@ -1559,7 +1637,7 @@ $("#imprun").onclick=async()=>{
     const g=await r.json();
     g.meta=Object.assign({title:"Imported — "+f.name, source:`xscalenet reconstruction · ${((performance.now()-t0)/1000).toFixed(1)}s`}, g.meta||{});
     $("#importmask").style.display="none";
-    resize(); loadBase(g);
+    resize(); stateKey="import:"+f.name; loadBase(g);
     flash(`Reconstructed ${g.nodes.length} nodes / ${g.edges.length} edges`);
   }catch(e){
     $("#impstatus").innerHTML="⚠ "+String(e.message||e).replace(/</g,"&lt;").slice(0,300);
@@ -1570,6 +1648,7 @@ addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
 resize();
 if(location.protocol.startsWith("http")){
   const gfile=new URLSearchParams(location.search).get("graph")||"scapis.graph.json";
+  stateKey=gfile;
   fetch(gfile).then(r=>r.ok?r.json():Promise.reject())
     .then(g=>{ resize(); loadBase(g); })
     .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”. The SCAPIS demo (<code>scapis.graph.json</code>) is client data and is not bundled in the repo.</span>'; });

@@ -147,8 +147,17 @@ graphs:
 - Hover for taxonomy + degree + ATC; drag nodes, pan the background, and zoom by
   scroll, **two-finger pinch** (trackpad or touch), or Safari pinch gesture.
 
+- **Persistent analysis** — the whole state (filters, colouring, size-by,
+  layout, live-sim on/off, detected modules, focused subgraph, coverage heatmap,
+  propagation step, selection, legend toggles, **pan/zoom and the exact node
+  positions**) is auto-saved to the URL and to `localStorage` keyed by the loaded
+  graph. A plain **refresh restores it where you left off**; the URL stays
+  shareable. **↺ Reset** (header) clears everything back to the initial network.
+
 Shareable views via URL query:
-`network.html?ec=0.4&sign=pos&colorby=phylum&sizeby=atc_last&prop=4`.
+`network.html?ec=0.4&sign=pos&colorby=phylum&sizeby=atc_last&prop=4`. The same
+query is what the app writes back as you work, so copying the address bar at any
+time captures your current analysis.
 
 ### Adding ATC to a network
 
