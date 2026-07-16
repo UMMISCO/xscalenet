@@ -744,7 +744,10 @@ function hexToRgb(h){ h=(h||"#888").replace('#',''); if(h.length===3) h=h.split(
 function propColor(i){
   const row=trace[prop.step]?.config?.[i]; if(!row) return COL.muted;
   const tot=row.reduce((a,b)=>a+b,0);
-  if(tot<=1e-12) return COL.line;                 // no mass yet -> faint
+  // A node with no theme mass at this step (unannotated, or a peripheral node
+  // that has shed its mass to the connected core under column renormalization) is
+  // drawn a clear grey — "no annotation here" — not near-white (which read as gone).
+  if(tot<=1e-12) return "#b9c0cb";
   let r=0,g=0,b=0; for(let j=0;j<row.length;j++){ const w=row[j]/tot;
     r+=w*themeRGB[j][0]; g+=w*themeRGB[j][1]; b+=w*themeRGB[j][2]; }
   return `rgb(${r|0},${g|0},${b|0})`;
