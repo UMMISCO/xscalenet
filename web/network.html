@@ -98,7 +98,7 @@
   <div class="brand"><b>xscalenet</b><span>network browser</span></div>
   <div class="grow"></div>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
-  <button class="btn" id="relayout" title="Re-run the current force layout on just the visible (filtered) nodes">Re-layout filtered</button>
+  <button class="btn" id="sim" title="Run a live force simulation that re-flows the layout as you filter">⚛ Simulate</button>
 </header>
 
 <div id="app">
@@ -319,7 +319,7 @@ function load(g){
   syncLabels(); apply();
   if(q.get("layout") && $("#layout2").querySelector(`[value=${CSS.escape(q.get("layout"))}]`)){
     $("#layout2").value=q.get("layout"); applyLayout(q.get("layout")); }
-  if(q.get("relayout")){ const ns=nodes.filter(n=>VIS.visN.has(n.i)); if(ns.length){ relax(320, ns, VIS.edges); render(); } }
+  if(q.get("sim")||q.get("relayout")){ startSim(); }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
@@ -390,6 +390,7 @@ let VIS={edges:[],visN:new Set(),deg:{}};
 function apply(){
   VIS=computeVisible();
   drawStats(); render(); scaleFree();
+  if(sim.on) reheat(0.55);   // live layout re-flows to the new filtered set
 }
 
 function drawStats(){
@@ -411,12 +412,12 @@ function byGroupDeg(a,b){ const ga=groupOf(a),gb=groupOf(b);
   if(ga<gb)return -1; if(ga>gb)return 1; return (+b.degree||0)-(+a.degree||0); }
 // Apply a named layout to ALL nodes, then fit. Fixed/original = igraph coords.
 function applyLayout(name){
+  if(name==="force"){ startSim(); return; }   // live simulation
+  stopSim();
   currentLayout=name;
   const N=nodes.length, R=Math.min(stageW(),stageH())*0.42;
   if(name==="igraph" && hasFixedLayout){
     nodes.forEach(n=>{ n.x=+G.nodes[n.i].x; n.y=-G.nodes[n.i].y; });
-  } else if(name==="force"){
-    seedLayout(); relax(400, nodes, edges); render(); return;   // relax fits to all nodes
   } else if(name==="circle"){
     const ord=[...nodes].sort(byGroupDeg);
     ord.forEach((n,i)=>{ const a=2*Math.PI*i/N-Math.PI/2; n.x=Math.cos(a)*R; n.y=Math.sin(a)*R; });
@@ -438,30 +439,74 @@ function seedLayout(){
   nodes.forEach((n,k)=>{const a=2*Math.PI*k/nodes.length;
     n.x=cx+Math.cos(a)*R*(0.5+0.5*Math.random()); n.y=cy+Math.sin(a)*R*(0.5+0.5*Math.random());});
 }
-// Force-directed relaxation over `ns` nodes using `es` edges (defaults: whole
-// graph). Passing the visible subset re-lays-out just the filtered network.
+// One force-integration pass over `ns` (repulsion among ns, spring attraction
+// along `es`, gentle pull to their centroid), movement scaled by `alpha`.
+// Shared by the one-shot relax() and the live simulation.
+function forcePass(ns, es, alpha){
+  if(ns.length<2) return;
+  const W=stageW(),H=stageH(), k=Math.sqrt(W*H/Math.max(1,ns.length))*0.62;
+  let ccx=0,ccy=0; for(const n of ns){ccx+=n.x;ccy+=n.y;} ccx/=ns.length; ccy/=ns.length;
+  for(const n of ns){ n.vx*=0.88; n.vy*=0.88; }
+  for(let i=0;i<ns.length;i++){const a=ns[i];
+    for(let j=i+1;j<ns.length;j++){const b=ns[j];
+      let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
+      const f=k*k/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
+  for(const e of es){const a=nodes[e.a],b=nodes[e.b]; if(!a||!b)continue;
+    let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.06;
+    a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
+  for(const n of ns){ if(n===dragging) continue;
+    n.vx+=(ccx-n.x)*0.02; n.vy+=(ccy-n.y)*0.02;
+    n.x+=Math.max(-30,Math.min(30,n.vx))*alpha; n.y+=Math.max(-30,Math.min(30,n.vy))*alpha; }
+}
+// One-shot relaxation (cools over `iter` passes), used for the initial force
+// layout of graphs with no coordinates.
 function relax(iter, ns, es){
-  ns=ns||nodes; es=es||edges;
-  if(!ns.length) return;
-  const W=stageW(),H=stageH();
-  const k=Math.sqrt(W*H/Math.max(1,ns.length))*0.62;
-  for(let t=0;t<iter;t++){
-    const cool=1-t/iter;
-    for(const n of ns){n.vx*=0.9;n.vy*=0.9;}
-    // Barnes-hut would be nicer; O(n²) is fine at n≈500
-    for(let i=0;i<ns.length;i++){const a=ns[i];
-      for(let j=i+1;j<ns.length;j++){const b=ns[j];
-        let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1,d=Math.sqrt(d2);
-        const f=k*k/d2*2.0; a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
-    for(const e of es){const a=nodes[e.a],b=nodes[e.b];
-      let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,f=(d-k)*0.06;
-      a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}
-    const cx=W/2,cy=H/2;
-    for(const n of ns){n.vx+=(cx-n.x)*0.004;n.vy+=(cy-n.y)*0.004;
-      n.x+=Math.max(-30,Math.min(30,n.vx))*cool; n.y+=Math.max(-30,Math.min(30,n.vy))*cool;}
-  }
+  ns=ns||nodes; es=es||edges; if(!ns.length) return;
+  for(let t=0;t<iter;t++) forcePass(ns, es, 1-t/iter);
   fitView(ns);
 }
+
+// ---------- live simulation ----------
+// A continuously-running force sim on the VISIBLE subgraph. Turn it on once and
+// the layout re-flows smoothly as you filter (no button-per-change, no
+// teleporting); freeze when happy. `alpha` is the temperature (cools to rest;
+// filtering/dragging reheats it).
+const sim={on:false, alpha:0, raf:0};
+function simVisible(){ return nodes.filter(n=>VIS.visN.has(n.i)); }
+// Rescale ALL nodes so their spread ~fills the stage — force constants assume
+// screen-scale coordinates, so this must run before simulating off a tight
+// layout (e.g. the igraph coords). Rescaling all (not just visible) keeps every
+// node on the same scale, so revealing hidden nodes mid-sim stays consistent.
+function normalizeToStage(){
+  const xs=nodes.map(n=>n.x),ys=nodes.map(n=>n.y);
+  const minx=Math.min(...xs),maxx=Math.max(...xs),miny=Math.min(...ys),maxy=Math.max(...ys);
+  const W=stageW(),H=stageH(), span=Math.max(maxx-minx,maxy-miny,1e-6);
+  const s=Math.min(W,H)*0.78/span, cx=(minx+maxx)/2, cy=(miny+maxy)/2;
+  nodes.forEach(n=>{ n.x=W/2+(n.x-cx)*s; n.y=H/2+(n.y-cy)*s; n.vx=0; n.vy=0; });
+}
+function simStep(){
+  sim.raf=0; if(!sim.on) return;
+  forcePass(simVisible(), VIS.edges, sim.alpha);
+  sim.alpha*=0.985; render();
+  if(sim.alpha>0.02) sim.raf=requestAnimationFrame(simStep);
+  else { fitView(simVisible()); render(); }   // settled: one clean fit, keep 'on' so filters reheat
+}
+function reheat(a){ if(!sim.on) return;
+  sim.alpha=Math.min(1, Math.max(sim.alpha, a||0.5));
+  if(!sim.raf) sim.raf=requestAnimationFrame(simStep); }
+function startSim(){
+  const ns=simVisible(); if(!ns.length) return;
+  if(currentLayout!=="force") normalizeToStage();   // coming off a tight/static layout
+  currentLayout="force"; if($("#layout2")) $("#layout2").value="force";
+  sim.on=true; sim.alpha=1; fitView(ns);
+  if(!sim.raf) sim.raf=requestAnimationFrame(simStep);
+  updateSimBtn();
+}
+function stopSim(){ sim.on=false; if(sim.raf){cancelAnimationFrame(sim.raf); sim.raf=0;} updateSimBtn(); }
+function updateSimBtn(){ const b=$("#sim"); if(!b) return;
+  b.textContent=sim.on?"❚❚ Freeze layout":"⚛ Simulate"; b.classList.toggle("primary", sim.on);
+  b.title=sim.on?"Live physics on — the layout re-flows as you filter. Click to freeze."
+               :"Run a live force simulation that re-flows the layout as you filter."; }
 function fitView(ns){
   ns=ns||nodes;
   const xs=ns.map(n=>n.x),ys=ns.map(n=>n.y);
@@ -618,7 +663,8 @@ function pick(mx,my){
 }
 CV.addEventListener("pointermove",ev=>{
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
-  if(dragging){ const p=toGraph(mx,my); dragging.x=p.x; dragging.y=p.y; render(); return; }
+  if(dragging){ const p=toGraph(mx,my); dragging.x=p.x; dragging.y=p.y;
+    dragging.vx=dragging.vy=0; if(sim.on) reheat(0.3); else render(); return; }
   if(panning){ view.x=panning.vx+(ev.clientX-panning.px); view.y=panning.vy+(ev.clientY-panning.py); render(); return; }
   const h=pick(mx,my);
   if(h!==hot){ hot=h; render(); }
@@ -722,12 +768,7 @@ function tickProp(){ if(!prop.playing) return;
   prop.timer=setTimeout(tickProp, 700);
 }
 $("#layout2").onchange=e=>applyLayout(e.target.value);
-// Re-layout only the visible (filtered) subgraph, relaxing from current positions.
-$("#relayout").onclick=()=>{
-  const ns=nodes.filter(n=>VIS.visN.has(n.i));
-  if(!ns.length) return;
-  relax(320, ns, VIS.edges); render();
-};
+$("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)

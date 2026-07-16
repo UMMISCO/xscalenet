@@ -55,9 +55,12 @@ graphs:
   number of species, with between-taxa edges (width ∝ number of species-edges).
 - **Layout** — a selector: *original (igraph)* when nodes carry `x`/`y` (e.g.
   exported from the R igraph object's layout matrix), *force-directed*, *circular
-  (by phylum)*, *concentric (by degree)*, and *grid (by phylum)*. **Re-layout
-  filtered** re-runs the force layout on just the visible (filtered) subgraph.
-  (`?layout=` / `?relayout=1` for shareable views.)
+  (by phylum)*, *concentric (by degree)*, and *grid (by phylum)*.
+- **Simulate** (⚛) — a **live** force simulation on the *visible* subgraph:
+  turn it on once and the layout re-flows smoothly as you filter (no re-layout
+  button per change, no teleporting); dragging a node nudges its neighbours;
+  **Freeze** when happy. This is the ergonomic way to "re-lay-out after
+  filtering." (`?sim=1` / `?layout=` for shareable views.)
 - **Size by** degree, taxon size, or ATC (dist·co-inertia / last-config), when
   available.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a
