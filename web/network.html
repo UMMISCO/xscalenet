@@ -332,7 +332,7 @@ function heat(t){ t=Math.max(0,Math.min(1,t||0)); const s=t*(VIRIDIS.length-1), 
   return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`; }
 function popcnt(x){ x=x-((x>>>1)&0x55555555); x=(x&0x33333333)+((x>>>2)&0x33333333); x=(x+(x>>>4))&0x0f0f0f0f; return (x*0x01010101)>>>24; }
 function toggleCoverage(){
-  if(covMode){ covMode=false; $("#subgcov").classList.remove("primary"); $("#covlegend").innerHTML=""; buildColors(); apply(); return; }
+  if(covMode){ covMode=false; $("#subgcov").classList.remove("primary"); $("#covlegend").innerHTML=""; buildColors(); render(); return; }
   if(!subgraphs.length) return;
   covW=Math.ceil(subgraphs.length/32);
   covBits=Array.from({length:nodes.length},()=>new Uint32Array(covW));
