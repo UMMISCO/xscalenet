@@ -78,6 +78,9 @@ graphs:
 
 - **Colour by taxonomy / annotation** — a dropdown over any categorical node
   field (phylum, family, …) with a click-to-toggle legend.
+- **Find a node** — the header search box matches by id or any annotation (taxon
+  name); ↑/↓ + Enter or click a result to select and centre/zoom on it. Essential
+  on large imported networks. (`?find=<query>`)
 - **Select a node & act on it** — click a node to *pin* it (Shift/⌘-click for
   multi-select; click empty / Esc to clear). The Node panel then shows its full
   taxonomy, degree, ATC, and a **signed partner list** (neighbours sorted by
