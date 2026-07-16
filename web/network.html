@@ -97,10 +97,8 @@
 <header>
   <div class="brand"><b>xscalenet</b><span>network browser</span></div>
   <div class="grow"></div>
-  <a class="btn" href="index.html">◐ Propagation player</a>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
-  <button class="btn" id="relayout" title="Force-layout the currently visible (filtered) nodes">Re-layout filtered</button>
-  <button class="btn" id="resetlayout" title="Restore the original layout">Reset</button>
+  <button class="btn" id="relayout" title="Re-run the current force layout on just the visible (filtered) nodes">Re-layout filtered</button>
 </header>
 
 <div id="app">
@@ -121,6 +119,8 @@
       <div class="legend" id="legend" style="margin-top:9px"></div>
       <div style="margin-top:11px"><span class="lh" style="font-size:12px;color:var(--muted)">Size by</span>
         <select id="sizeby" style="margin-top:5px"></select></div>
+      <div style="margin-top:11px"><span class="lh" style="font-size:12px;color:var(--muted)">Layout</span>
+        <select id="layout2" style="margin-top:5px"></select></div>
     </div>
 
     <div class="sec" id="layersec" style="display:none">
@@ -302,6 +302,12 @@ function load(g){
   $("#md").max=Math.min(20, Math.max(2,...nodes.map(n=>n.degree||0)));
 
   buildColors();
+  // layout options: 'igraph' only when the graph carries coordinates
+  const layoutOpts=[]; if(hasFixedLayout) layoutOpts.push(["igraph","original (igraph)"]);
+  layoutOpts.push(["force","force-directed"],["circle","circular (by phylum)"],
+    ["concentric","concentric (by degree)"],["grid","grid (by phylum)"]);
+  $("#layout2").innerHTML=layoutOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+  currentLayout=hasFixedLayout?"igraph":"force"; $("#layout2").value=currentLayout;
   if(hasFixedLayout) fitView(); else { seedLayout(); relax(300); }
   // optional shareable view: ?ec=0.4&sign=pos&colorby=phylum
   const q=new URLSearchParams(location.search);
@@ -311,6 +317,8 @@ function load(g){
   if(q.get("ec")!=null){ const ec=$("#ec"); ec.value=q.get("ec"); filt.ec=+ec.value; }
   if(q.get("sizeby")){ sizeBy=q.get("sizeby"); $("#sizeby").value=sizeBy; }
   syncLabels(); apply();
+  if(q.get("layout") && $("#layout2").querySelector(`[value=${CSS.escape(q.get("layout"))}]`)){
+    $("#layout2").value=q.get("layout"); applyLayout(q.get("layout")); }
   if(q.get("relayout")){ const ns=nodes.filter(n=>VIS.visN.has(n.i)); if(ns.length){ relax(320, ns, VIS.edges); render(); } }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   const b=$("#badge");
@@ -397,6 +405,34 @@ function kv(k,v){return `<div class="kv"><span class="k">${k}</span><b>${v}</b><
 // ---------- layout ----------
 function stageW(){return $("#stage").clientWidth||900;}
 function stageH(){return $("#stage").clientHeight||600;}
+let currentLayout="force";
+// order nodes by phylum group then descending degree, so grouped layouts read well
+function byGroupDeg(a,b){ const ga=groupOf(a),gb=groupOf(b);
+  if(ga<gb)return -1; if(ga>gb)return 1; return (+b.degree||0)-(+a.degree||0); }
+// Apply a named layout to ALL nodes, then fit. Fixed/original = igraph coords.
+function applyLayout(name){
+  currentLayout=name;
+  const N=nodes.length, R=Math.min(stageW(),stageH())*0.42;
+  if(name==="igraph" && hasFixedLayout){
+    nodes.forEach(n=>{ n.x=+G.nodes[n.i].x; n.y=-G.nodes[n.i].y; });
+  } else if(name==="force"){
+    seedLayout(); relax(400, nodes, edges); render(); return;   // relax fits to all nodes
+  } else if(name==="circle"){
+    const ord=[...nodes].sort(byGroupDeg);
+    ord.forEach((n,i)=>{ const a=2*Math.PI*i/N-Math.PI/2; n.x=Math.cos(a)*R; n.y=Math.sin(a)*R; });
+  } else if(name==="concentric"){
+    // rings by degree: hubs at the centre, leaves outside
+    const rings=6, maxd=Math.max(1,...nodes.map(n=>+n.degree||0)), buckets={};
+    nodes.forEach(n=>{ const r=rings-1-Math.min(rings-1,Math.floor((+n.degree||0)/maxd*rings));
+      (buckets[r]=buckets[r]||[]).push(n); });
+    Object.keys(buckets).forEach(r=>{ const ns=buckets[r].sort(byGroupDeg), rad=(+r+1)*(R/rings);
+      ns.forEach((n,i)=>{ const a=2*Math.PI*i/ns.length-Math.PI/2; n.x=Math.cos(a)*rad; n.y=Math.sin(a)*rad; }); });
+  } else if(name==="grid"){
+    const ord=[...nodes].sort(byGroupDeg), cols=Math.ceil(Math.sqrt(N)), gap=(2*R)/cols;
+    ord.forEach((n,i)=>{ n.x=-R+(i%cols)*gap; n.y=-R+Math.floor(i/cols)*gap; });
+  }
+  fitView(); render();
+}
 function seedLayout(){
   const W=stageW(),H=stageH(),cx=W/2,cy=H/2,R=Math.min(W,H)*0.42;
   nodes.forEach((n,k)=>{const a=2*Math.PI*k/nodes.length;
@@ -685,17 +721,12 @@ function tickProp(){ if(!prop.playing) return;
   if(prop.step>=trace.length-1) setProp(0); else setProp(prop.step+1);
   prop.timer=setTimeout(tickProp, 700);
 }
+$("#layout2").onchange=e=>applyLayout(e.target.value);
 // Re-layout only the visible (filtered) subgraph, relaxing from current positions.
 $("#relayout").onclick=()=>{
   const ns=nodes.filter(n=>VIS.visN.has(n.i));
   if(!ns.length) return;
   relax(320, ns, VIS.edges); render();
-};
-// Reset to the original layout (igraph coordinates if present, else a fresh force layout of the whole graph).
-$("#resetlayout").onclick=()=>{
-  if(hasFixedLayout){ nodes.forEach(n=>{ n.x=+G.nodes[n.i].x; n.y=-G.nodes[n.i].y; }); fitView(); }
-  else { seedLayout(); relax(300, nodes, edges); }
-  render();
 };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }

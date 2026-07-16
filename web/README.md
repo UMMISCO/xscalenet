@@ -1,14 +1,23 @@
 # xscalenet web
 
 Self-contained, dependency-free frontends for xscalenet output. No build step —
-just static files.
+just static files. Two **independent** tools (they don't share a dataset):
+
+- **`network.html`** — browse/analyse a real reconstructed network (e.g. SCAPIS),
+  with in-context ATC propagation. This is the main app.
+- **`index.html`** — a standalone, dataset-agnostic player for the propagation
+  *algorithm* on **small** annotated graphs (default: the 10-node R-validated
+  reference). Best when per-node pie charts are legible.
 
 ## ATC propagation player — `index.html`
 
-The real app. Animates the annotation-propagation dynamics (ATC, Prifti et al.
-*Bioinformatics* 2010) **step by step**: each node is a pie chart of its theme
-weights `Tᵖ`, the timeline scrubs through the propagation, the co-inertia curve
-tracks convergence, and the bars rank nodes by ATC.
+A standalone, dataset-agnostic player for the annotation-propagation dynamics
+(ATC, Prifti et al. *Bioinformatics* 2010), for **small** annotated graphs.
+Animates it **step by step**: each node is a pie chart of its theme weights
+`Tᵖ`, the timeline scrubs through the propagation, the co-inertia curve tracks
+convergence, and the bars rank nodes by ATC. It loads **any** graph.json with an
+`atc_trace`; the bundled default is the 10-node reference. For large real
+networks, use the network browser instead (it animates the same propagation).
 
 ```sh
 # 1. generate the bundled demo (the R-validated 10-node test network)
@@ -44,11 +53,11 @@ graphs:
 - **Taxonomic layers** — collapse the species network to any rank (genus →
   phylum): each node becomes a taxon at its members' layout centroid, sized by
   number of species, with between-taxa edges (width ∝ number of species-edges).
-- **Layout** — if nodes carry `x`/`y` (e.g. exported from the R igraph object's
-  layout matrix), those fixed coordinates are used; otherwise a force layout.
-  **Re-layout filtered** force-lays-out just the currently visible (filtered)
-  subgraph; **Reset** restores the original layout. (`?relayout=1` re-lays a
-  shared filtered view on load.)
+- **Layout** — a selector: *original (igraph)* when nodes carry `x`/`y` (e.g.
+  exported from the R igraph object's layout matrix), *force-directed*, *circular
+  (by phylum)*, *concentric (by degree)*, and *grid (by phylum)*. **Re-layout
+  filtered** re-runs the force layout on just the visible (filtered) subgraph.
+  (`?layout=` / `?relayout=1` for shareable views.)
 - **Size by** degree, taxon size, or ATC (dist·co-inertia / last-config), when
   available.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a

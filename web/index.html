@@ -1,15 +1,19 @@
 <!doctype html>
 <!--
-  xscalenet — ATC propagation player.
+  xscalenet — ATC propagation player (small annotated graphs).
 
-  The real web app (not the throwaway viewer.html): loads a graph.json that
-  carries an `atc_trace` and animates the annotation-propagation dynamics
-  (Prifti et al. 2010) step by step. Nodes are pie charts of theme weights Tᵖ;
-  the timeline scrubs through the propagation; the co-inertia curve shows
-  convergence; ATC bars rank nodes by centrality.
+  A standalone, dataset-agnostic player for the annotation-propagation dynamics
+  (Prifti et al. 2010): loads ANY graph.json that carries an `atc_trace` and
+  animates it step by step — nodes are pie charts of theme weights Tᵖ, the
+  timeline scrubs the propagation, the co-inertia curve shows convergence, and
+  ATC bars rank nodes. Best for small graphs where per-node pies are legible;
+  for large real networks (e.g. SCAPIS) use the network browser, which animates
+  the same propagation in-context. This is NOT tied to any one dataset — the
+  bundled default is the 10-node R-validated reference; drop in your own with
+  "Load graph.json".
 
   Self-contained, dependency-free. Open over http (python3 -m http.server) so it
-  can fetch the bundled example, or use "Load graph.json".
+  can fetch the bundled default, or use "Load graph.json".
 -->
 <html lang="en">
 <head>
@@ -119,10 +123,9 @@
 </head>
 <body>
 <header>
-  <div class="brand"><b>xscalenet</b><span>ATC propagation player</span></div>
+  <div class="brand"><b>xscalenet</b><span>ATC propagation player · small annotated graphs</span></div>
   <div class="legend" id="legend"></div>
   <div class="grow"></div>
-  <a class="btn" href="network.html">◉ Network browser</a>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
   <button class="btn" id="relayout">Re-layout</button>
 </header>
