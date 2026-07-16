@@ -169,6 +169,15 @@
         <input type="checkbox" id="autoflow"> auto-flow layout on filter</label>
     </div>
 
+    <div class="sec">
+      <h2>Modularity <span class="hint" id="modq"></span></h2>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
+        <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
+      <button class="btn primary" id="moddetect" style="width:100%;margin-top:8px;justify-content:center">Detect modules (Louvain)</button>
+      <div class="hint" id="modhint" style="margin-top:7px">Partition the network into communities that maximise modularity, then colour by module.</div>
+      <div id="modlist" class="nbrs" style="margin-top:8px"></div>
+    </div>
+
     <div class="sec" id="layersec" style="display:none">
       <h2>Taxonomic layer</h2>
       <select id="layer"></select>
@@ -309,6 +318,7 @@ let hasFixedLayout=false;
 function load(g){
   G=g;
   selected=new Set(); focus=null;   // node indices are graph-specific — reset on (re)load
+  $("#modq").textContent=""; $("#modlist").innerHTML=""; $("#modhint").style.display="";
   // Fixed layout: use igraph coordinates from the graph when present (y flipped
   // to match the R/igraph plot, whose y points up). Otherwise force-layout.
   hasFixedLayout = (g.nodes||[]).length>0 && g.nodes.every(n=>Number.isFinite(+n.x)&&Number.isFinite(+n.y)) && ('x' in (g.nodes[0]||{}));
@@ -391,6 +401,7 @@ function load(g){
   if(q.get("select") && idx[q.get("select")]!=null){ selected=new Set([idx[q.get("select")]]);
     if(q.get("focus")) focus=egoIndices([...selected], edges); apply(); }
   if(q.get("import")) $("#importbtn").click();
+  if(q.get("modules")) detectModules();
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
@@ -589,6 +600,87 @@ function fitView(ns){
   const k=Math.min((W-2*pad)/Math.max(1e-6,maxx-minx),(H-2*pad)/Math.max(1e-6,maxy-miny),60);
   view.k=isFinite(k)&&k>0?k:1;
   view.x=W/2-((minx+maxx)/2)*view.k; view.y=H/2-((miny+maxy)/2)*view.k;
+}
+
+// ---------- modularity (Louvain community detection) ----------
+// One level of local moving: each node joins the neighbouring community with the
+// largest modularity gain, until stable.
+function louvainLevel(n, adj, k, m2){
+  const comm=new Int32Array(n); for(let i=0;i<n;i++) comm[i]=i;
+  const sigmaTot=Float64Array.from(k);
+  let improved=true, rounds=0;
+  while(improved && rounds++<50){
+    improved=false;
+    for(let i=0;i<n;i++){
+      const ci=comm[i]; sigmaTot[ci]-=k[i];
+      const wTo=new Map();
+      for(const [j,w] of adj[i]){ if(j===i) continue; const cj=comm[j]; wTo.set(cj,(wTo.get(cj)||0)+w); }
+      let bestC=ci, best=(wTo.get(ci)||0) - k[i]*sigmaTot[ci]/m2;
+      for(const [c,wic] of wTo){ const val=wic - k[i]*sigmaTot[c]/m2; if(val>best+1e-9){ best=val; bestC=c; } }
+      comm[i]=bestC; sigmaTot[bestC]+=k[i];
+      if(bestC!==ci) improved=true;
+    }
+  }
+  return comm;
+}
+// Multi-level Louvain: local moving, then aggregate communities into super-nodes
+// and repeat. Returns the community index of every original node.
+function louvainRun(n0, adj0, k0, m2){
+  let n=n0, adj=adj0, k=k0;
+  const mapping=new Int32Array(n0); for(let i=0;i<n0;i++) mapping[i]=i;
+  for(let lvl=0; lvl<20; lvl++){
+    const comm=louvainLevel(n, adj, k, m2);
+    const relab=new Map(); let c=0;
+    for(let i=0;i<n;i++){ if(!relab.has(comm[i])) relab.set(comm[i], c++); }
+    for(let i=0;i<n0;i++) mapping[i]=relab.get(comm[mapping[i]]);
+    if(c===n) break;                                  // no merges → converged
+    const sadj=Array.from({length:c},()=>new Map());
+    for(let i=0;i<n;i++){ const ci=relab.get(comm[i]);
+      for(const [j,w] of adj[i]){ const cj=relab.get(comm[j]); sadj[ci].set(cj,(sadj[ci].get(cj)||0)+w); } }
+    const nadj=sadj.map(mp=>[...mp.entries()]);
+    const nk=new Float64Array(c); for(let i=0;i<c;i++) for(const [,w] of nadj[i]) nk[i]+=w;
+    n=c; adj=nadj; k=nk;
+  }
+  return mapping;
+}
+function detectModules(){
+  const weighted=$("#modweight").checked, n=nodes.length;
+  const adj=Array.from({length:n},()=>[]); const k=new Float64Array(n); let m2=0;
+  const ew=e=> weighted ? (Math.abs(e.ecorr)||1) : 1;
+  for(const e of edges){ if(e.a===e.b) continue; const w=ew(e);
+    adj[e.a].push([e.b,w]); adj[e.b].push([e.a,w]); k[e.a]+=w; k[e.b]+=w; m2+=2*w; }
+  if(m2===0){ $("#modq").textContent="(no edges)"; return; }
+  const map=louvainRun(n, adj, k, m2);
+  // rank communities by size → M1 is the largest
+  const size={}; for(let i=0;i<n;i++) size[map[i]]=(size[map[i]]||0)+1;
+  const order=Object.keys(size).map(Number).sort((a,b)=>size[b]-size[a]);
+  const rank=new Map(); order.forEach((c,i)=>rank.set(c,i+1));
+  nodes.forEach(nd=>{ nd.module="M"+rank.get(map[nd.i]); });
+  // modularity Q = Σ_c [ Σin_c/m2 − (Σtot_c/m2)² ]
+  const nC=order.length, sumIn=new Float64Array(nC+1), sumTot=new Float64Array(nC+1);
+  nodes.forEach(nd=>{ sumTot[rank.get(map[nd.i])]+=k[nd.i]; });
+  for(const e of edges){ if(e.a===e.b) continue; if(map[e.a]===map[e.b]) sumIn[rank.get(map[e.a])]+=2*ew(e); }
+  let Q=0; for(let c=1;c<=nC;c++) Q+=sumIn[c]/m2 - (sumTot[c]/m2)**2;
+  $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} modules`;
+  $("#modhint").style.display="none";
+  // add a "module" colour option and colour by it
+  if(!$("#colorby").querySelector('option[value=module]')){
+    const o=document.createElement("option"); o.value="module"; o.textContent="module (Louvain)"; $("#colorby").appendChild(o); }
+  colorField="module"; $("#colorby").value="module"; buildColors(); apply();
+  // module list (top by size), click to focus
+  const byMod={}; nodes.forEach(nd=>{ (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
+  const mids=order.map((_,i)=>"M"+(i+1)).slice(0,15);
+  $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
+    const pc={}; ms.forEach(nd=>{ const p=nd.phylum_group||nd.phylum||"—"; pc[p]=(pc[p]||0)+1; });
+    const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0]||"";
+    return `<div class="nbr" onclick="focusModule('${mid}')" title="focus ${mid}">`+
+      `<span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
+      `<span class="nm">${mid} <i>${dom}</i></span><b>${ms.length}</b></div>`; }).join("")+
+    (order.length>15?`<div class="hint">+${order.length-15} more</div>`:"");
+}
+function focusModule(mid){
+  const set=new Set(); nodes.forEach(nd=>{ if(nd.module===mid) set.add(nd.i); });
+  if(!set.size) return; focus=set; selected=new Set(); apply(); updateFocusChip(); showInfo();
 }
 
 // ---------- render ----------
@@ -961,6 +1053,8 @@ function tickProp(){ if(!prop.playing) return;
 $("#layout2").onchange=e=>applyLayout(e.target.value);
 $("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) startSim(); };
+$("#moddetect").onclick=detectModules;
+$("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)

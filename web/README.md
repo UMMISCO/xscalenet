@@ -80,6 +80,10 @@ graphs:
   against the scale-free criteria (Barabási's 2 ≤ γ ≤ 3; WGCNA's R² ≥ 0.80), and
   **recommends a min-|ecorr| threshold** that maximises the power-law fit while
   keeping a meaningful fraction of nodes. One click applies it.
+- **Modularity** — detect communities with **Louvain** (multi-level, optionally
+  weighted by `|ecorr|`); reports the modularity **Q** and #modules, colours the
+  network by module, and lists modules (size + dominant taxon) — click one to
+  isolate it. `?modules=1` deep-links a coloured partition.
 - **Taxonomic layers** — collapse the species network to any rank (genus →
   phylum): each node becomes a taxon at its members' layout centroid, sized by
   number of species, with between-taxa edges (width ∝ number of species-edges).
