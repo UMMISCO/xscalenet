@@ -36,6 +36,27 @@ The demo is the exact graph `J` + membership `m0` that xscalenet validates
 against R (`src/atc.rs::matches_r_dynamic_propagation`): 10 nodes, 3 themes
 (brown / black / yellow), converging at step 2.
 
+## reconstruction server — `xscalenet-web`
+
+To reconstruct a network **from a raw matrix** inside the browser, run the local
+server (it embeds the validated Rust engine and serves this folder):
+
+```sh
+cargo run --features web --bin xscalenet-web        # serves ./web on http://localhost:8788
+```
+
+Open <http://localhost:8788/network.html>, click **⬆ Import data**, pick a matrix
+(variables in columns, samples in rows — or tick transpose), choose params and an
+optional annotation table, and hit **Reconstruct**. The server runs
+`xscalenet::pipeline::run` + `analyze` and returns the `graph.json` the browser
+loads. Everything is local; large matrices use the full multi-threaded engine.
+`POST /run` accepts a multipart form (`data` file + `methods`, `thresh`,
+`transpose`, `discretize`, … fields, optional `annotation` file + `atc_col`).
+
+When the page is served by a plain static server instead (`python3 -m
+http.server`), the reconstruction button is inert (it detects `/health`); use
+**Load graph.json** with a pre-built graph in that case.
+
 ## network browser — `network.html`
 
 Canvas view of a reconstructed network (`graph.json`) for exploring larger

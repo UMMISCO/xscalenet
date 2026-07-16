@@ -9,12 +9,25 @@ license = "GPL-3.0-or-later"
 name = "xscalenet"
 path = "src/main.rs"
 
+# Local reconstruction server (raw matrix -> graph.json), built only with `--features web`.
+[[bin]]
+name = "xscalenet-web"
+path = "src/bin/web.rs"
+required-features = ["web"]
+
+[features]
+# `xscalenet-web` server: axum + tokio + static file serving.
+web = ["dep:axum", "dep:tokio", "dep:tower-http"]
+
 [dependencies]
 nalgebra = "0.33"
 rayon = "1.10"
 libm = "0.2"
 # Pure-Rust gzip (miniz_oxide backend) so `.gz` input works with no system deps.
 flate2 = "1"
+axum = { version = "0.7", features = ["multipart"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"], optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
 
 [dev-dependencies]
 # Only used by the `graph_atc` example to read/enrich an existing graph.json.

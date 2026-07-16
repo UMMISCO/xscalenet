@@ -114,12 +114,27 @@
   #focuschip .x{cursor:pointer;border:0;background:var(--line2);color:var(--ink);border-radius:50%;
     width:20px;height:20px;line-height:18px;text-align:center;font-size:13px}
   #focuschip .x:hover{background:var(--neg);color:#fff}
+  /* import modal */
+  #importmask{position:fixed;inset:0;background:rgba(10,15,25,.45);display:none;align-items:center;
+    justify-content:center;z-index:20;backdrop-filter:blur(2px)}
+  #importbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
+    width:min(520px,92vw);max-height:90vh;overflow:auto;padding:20px 22px}
+  #importbox h2{margin:0 0 4px;font-size:16px;font-weight:650}
+  #importbox p{margin:0 0 14px}
+  #importbox label{display:block;margin:11px 0;font-size:13px}
+  #importbox label > input[type=file],#importbox label > input[type=text]{display:block;margin-top:5px;width:100%;
+    background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+  #importbox .grid2{display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;margin:8px 0}
+  #importbox .ck{display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer}
+  #importbox .impacts{display:flex;align-items:center;gap:10px;margin-top:18px;flex-wrap:wrap}
+  #impstatus{font-size:12.5px}
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><b>xscalenet</b><span>network browser</span></div>
   <div class="grow"></div>
+  <button class="btn" id="importbtn" title="Reconstruct a network from a raw matrix (needs the local xscalenet-web server)">⬆ Import data</button>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
   <button class="btn" id="sim" title="Run a live force simulation that re-flows the layout as you filter">⚛ Simulate</button>
 </header>
@@ -196,6 +211,28 @@
       <button class="btn primary" id="applyrec" style="margin-top:9px;width:100%;justify-content:center">Apply recommended threshold</button>
     </div>
   </aside>
+</div>
+
+<div id="importmask">
+  <div id="importbox">
+    <h2>Import data — reconstruct a network</h2>
+    <p class="hint">Runs the validated xscalenet engine on your matrix (needs the local <code>xscalenet-web</code> server). Variables in columns, samples in rows — or tick transpose.</p>
+    <label>Matrix (.tsv / .csv / .gz)<input type="file" id="impdata" accept=".tsv,.csv,.txt,.gz"></label>
+    <div class="grid2">
+      <label class="ck"><input type="checkbox" id="imptranspose"> features in rows (transpose)</label>
+      <label class="ck"><input type="checkbox" id="impdisc"> discretize (pamk)</label>
+      <label class="ck"><input type="checkbox" id="impm_aracne" checked> ARACNE</label>
+      <label class="ck"><input type="checkbox" id="impm_hc" checked> bayes_hc</label>
+    </div>
+    <label>presence-frequency thresholds<input type="text" id="impthresh" value="0.3" placeholder="e.g. 0.3,0.8"></label>
+    <label>annotation table — optional (id + attributes)<input type="file" id="impannot" accept=".tsv,.csv,.txt"></label>
+    <label>annotation column — optional<input type="text" id="impcol" placeholder="(default: 2nd column)"></label>
+    <div class="impacts">
+      <button class="btn primary" id="imprun">Reconstruct</button>
+      <button class="btn" id="impcancel">Cancel</button>
+      <span id="impstatus" class="hint"></span>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -353,6 +390,7 @@ function load(g){
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   if(q.get("select") && idx[q.get("select")]!=null){ selected=new Set([idx[q.get("select")]]);
     if(q.get("focus")) focus=egoIndices([...selected], edges); apply(); }
+  if(q.get("import")) $("#importbtn").click();
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
@@ -898,6 +936,40 @@ $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) 
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
+
+// ---------- import: raw matrix -> reconstruction via xscalenet-web ----------
+let hasServer=false;
+fetch("health").then(r=>{ hasServer=r.ok; }).catch(()=>{});
+$("#importbtn").onclick=()=>{ $("#importmask").style.display="flex";
+  $("#impstatus").innerHTML = hasServer?"" : '⚠ start <code>xscalenet-web</code> to enable reconstruction'; };
+$("#impcancel").onclick=()=>{ $("#importmask").style.display="none"; };
+$("#importmask").onclick=e=>{ if(e.target.id==="importmask") $("#importmask").style.display="none"; };
+$("#imprun").onclick=async()=>{
+  const f=$("#impdata").files[0];
+  if(!f){ $("#impstatus").textContent="Pick a matrix file first."; return; }
+  const fd=new FormData();
+  fd.append("data", f);
+  if($("#imptranspose").checked) fd.append("transpose","1");
+  if($("#impdisc").checked) fd.append("discretize","1");
+  const ms=[]; if($("#impm_aracne").checked)ms.push("aracne"); if($("#impm_hc").checked)ms.push("bayes_hc");
+  fd.append("methods", ms.join(",")||"aracne");
+  fd.append("thresh", $("#impthresh").value.trim()||"0.3");
+  const an=$("#impannot").files[0];
+  if(an){ fd.append("annotation", an); if($("#impcol").value.trim()) fd.append("atc_col",$("#impcol").value.trim()); }
+  $("#imprun").disabled=true; $("#impstatus").innerHTML="⏳ reconstructing… (this can take seconds to minutes on large matrices)";
+  const t0=performance.now();
+  try{
+    const r=await fetch("run",{method:"POST", body:fd});
+    if(!r.ok){ throw new Error((await r.text())||("HTTP "+r.status)); }
+    const g=await r.json();
+    g.meta=Object.assign({title:"Imported — "+f.name, source:`xscalenet reconstruction · ${((performance.now()-t0)/1000).toFixed(1)}s`}, g.meta||{});
+    $("#importmask").style.display="none";
+    resize(); loadBase(g);
+    flash(`Reconstructed ${g.nodes.length} nodes / ${g.edges.length} edges`);
+  }catch(e){
+    $("#impstatus").innerHTML="⚠ "+String(e.message||e).replace(/</g,"&lt;").slice(0,300);
+  }finally{ $("#imprun").disabled=false; }
+};
 addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
 
 resize();
