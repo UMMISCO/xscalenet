@@ -437,8 +437,10 @@ function load(g){
   if(q.get("sim")||q.get("relayout")){ startSim(); }
   if(q.get("pie")){ propStyle="pie"; $("#propstyle")?.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v==="pie")); }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
-  if(q.get("select") && idx[q.get("select")]!=null){ selected=new Set([idx[q.get("select")]]);
-    if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); } apply(); }
+  if(q.get("select")){ const ids=q.get("select").split(",").map(s=>idx[s.trim()]).filter(j=>j!=null);
+    if(ids.length){ selected=new Set(ids);
+      if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); }
+      apply(); showInfo(); } }
   if(q.get("import")) $("#importbtn").click();
   if(q.get("modules")) detectModules();
   const b=$("#badge");
@@ -858,14 +860,20 @@ function drawPie(cx,cy,r,row,i){
 function render(){
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
-  // emphasis: pinned selection (+ its neighbours) takes priority over hover
-  const nbr = selected.size ? egoIndices([...selected], VIS.edges)
+  // emphasis: a shortest path (2 selected) > pinned selection ego > hover.
+  const pathOn = pathNodes.length>1;
+  const nbr = pathOn ? new Set(pathNodes)
+            : selected.size ? egoIndices([...selected], VIS.edges)
             : (hot>=0 ? neighbors(hot) : null);
   // edges
   for(const e of VIS.edges){
     const a=nodes[e.a],b=nodes[e.b];
-    // highlight only the induced subgraph — BOTH endpoints in the neighbourhood
-    // (an edge with just one endpoint inside would leak out to the 2nd ring).
+    const onPath = pathOn && pathEdgeSet.has(e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a);
+    if(onPath){
+      CTX.globalAlpha=1; CTX.strokeStyle=COL.accent; CTX.lineWidth=3.2/view.k;
+      CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue;
+    }
+    // highlight only the induced subgraph — BOTH endpoints in the neighbourhood.
     const on = !nbr || (nbr.has(e.a) && nbr.has(e.b));
     CTX.globalAlpha = on?(nbr?0.9:0.5):0.05;
     CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
@@ -888,6 +896,7 @@ function render(){
     }
     if(selected.has(n.i)){ CTX.lineWidth=2.6/view.k; CTX.strokeStyle=COL.accent; CTX.stroke();
       CTX.beginPath(); CTX.arc(n.x,n.y,r+3/view.k,0,7); CTX.lineWidth=1/view.k; CTX.stroke(); }
+    else if(pathOn && nbr.has(n.i)){ CTX.lineWidth=1.8/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else { CTX.lineWidth=0.7/view.k; CTX.strokeStyle=COL.panel; CTX.stroke(); }
   }
@@ -1022,6 +1031,21 @@ function inspect(i, pinned){
 }
 
 // ---------- selection + node actions ----------
+let pathNodes=[], pathEdgeSet=new Set();
+// shortest path (fewest hops) between the two selected nodes over the VISIBLE graph
+function computePath(){
+  pathNodes=[]; pathEdgeSet=new Set();
+  if(selected.size!==2) return;
+  const [s,t]=[...selected];
+  const adj={}; for(const e of VIS.edges){ (adj[e.a]=adj[e.a]||[]).push(e.b); (adj[e.b]=adj[e.b]||[]).push(e.a); }
+  const prev={}, seen=new Set([s]); const q=[s]; let found=false;
+  while(q.length){ const u=q.shift(); if(u===t){found=true;break;}
+    for(const v of (adj[u]||[])) if(!seen.has(v)){ seen.add(v); prev[v]=u; q.push(v); } }
+  if(!found) return;
+  const path=[]; let c=t; while(c!==undefined){ path.push(c); if(c===s) break; c=prev[c]; }
+  path.reverse(); pathNodes=path;
+  for(let i=0;i+1<path.length;i++){ const a=path[i],b=path[i+1]; pathEdgeSet.add(a<b?a+"|"+b:b+"|"+a); }
+}
 function selRepr(){ return selected.size ? [...selected][0] : -1; }
 function selectNode(i, additive){
   if(additive){ selected.has(i)?selected.delete(i):selected.add(i); }
@@ -1030,16 +1054,27 @@ function selectNode(i, additive){
 }
 function clearSelection(){ if(!selected.size) return; selected.clear(); showInfo(); render(); }
 function showInfo(){
+  computePath();
   if(selected.size===1) inspect([...selected][0], true);
   else if(selected.size>1) inspectMulti();
   else if(hot>=0) inspect(hot, false);
-  else $("#inspect").innerHTML='<h2>Node</h2><div class="hint">Click a node to pin its info, list its partners, and focus its neighbourhood. Shift/⌘-click to multi-select.</div>';
+  else $("#inspect").innerHTML='<h2>Node</h2><div class="hint">Click a node to pin its info, list its partners, and focus its neighbourhood. Shift/⌘-click to multi-select (2 nodes → shortest path).</div>';
 }
 function inspectMulti(){
+  let path="";
+  if(selected.size===2){
+    path = pathNodes.length>1
+      ? `<div class="kv"><span class="k">shortest path</span><b>${pathNodes.length-1} hops</b></div>`+
+        `<div class="nbrs" style="margin-top:4px">`+pathNodes.map(i=>
+          `<div class="nbr" onclick="selectNode(${i},false)"><span class="dot" style="background:${colorOf(nodes[i])}"></span>`+
+          `<span class="nm">${nodes[i].id} <i>${nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||'')}</i></span></div>`).join("")+`</div>`
+      : `<div class="hint" style="margin-top:6px">No path between them in the current (filtered) view.</div>`;
+  }
   $("#inspect").innerHTML=`<h2>${selected.size} nodes selected</h2>`+
     `<div class="acts"><button class="primary" onclick="focusSel()">Focus selection</button>`+
     `<button onclick="exportEgo()">Export ⬇</button><button onclick="clearSelection()">Clear</button></div>`+
-    `<div class="hint">Shift/⌘-click nodes to add/remove. Focus isolates them + their neighbours.</div>`;
+    path+
+    `<div class="hint" style="margin-top:6px">Shift/⌘-click nodes to add/remove.</div>`;
 }
 function nodeActions(i){
   const grp=groupOf(nodes[i]);
