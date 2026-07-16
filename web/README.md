@@ -97,7 +97,8 @@ graphs:
   play/scrub timeline animates the annotation propagation *on the real network*:
   each node's colour blends its evolving theme mix `Tᵖ`, with the per-step
   co-inertia readout. "off" restores the taxonomy colour.
-- Hover for taxonomy + degree + ATC; drag nodes, scroll to zoom, pan the background.
+- Hover for taxonomy + degree + ATC; drag nodes, pan the background, and zoom by
+  scroll, **two-finger pinch** (trackpad or touch), or Safari pinch gesture.
 
 Shareable views via URL query:
 `network.html?ec=0.4&sign=pos&colorby=phylum&sizeby=atc_last&prop=4`.

@@ -873,11 +873,36 @@ addEventListener("pointerup",()=>{
 });
 addEventListener("keydown",e=>{ if(e.key==="Escape"){ if(focus){focus=null;apply();updateFocusChip();} clearSelection(); } });
 $("#focusclear").onclick=clearFocus;
+// zoom by `factor` keeping the point (mx,my) under the cursor/fingers fixed
+function zoomAt(mx,my,factor){
+  const nk=Math.max(0.1,Math.min(10,view.k*factor));
+  view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; render();
+}
 CV.addEventListener("wheel",ev=>{ ev.preventDefault();
   const r=CV.getBoundingClientRect(), mx=ev.clientX-r.left, my=ev.clientY-r.top;
-  const f=Math.exp(-ev.deltaY*0.0015), nk=Math.max(0.15,Math.min(6,view.k*f));
-  view.x=mx-(mx-view.x)*(nk/view.k); view.y=my-(my-view.y)*(nk/view.k); view.k=nk; render();
+  // Trackpad pinch arrives as ctrl+wheel — zoom firmly; plain wheel zooms gently.
+  const rate = ev.ctrlKey ? 0.02 : 0.0015;
+  zoomAt(mx,my, Math.exp(-ev.deltaY*rate));
 },{passive:false});
+
+// Touch pinch (touchscreens / touch laptops): zoom around the fingers' midpoint.
+let pinch=null;
+const tDist=t=>Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+const tMid =t=>({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
+CV.addEventListener("touchstart",ev=>{ if(ev.touches.length===2){ ev.preventDefault();
+  pinch={d:tDist(ev.touches)}; } },{passive:false});
+CV.addEventListener("touchmove",ev=>{ if(ev.touches.length===2 && pinch){ ev.preventDefault();
+  const d=tDist(ev.touches), m=tMid(ev.touches), r=CV.getBoundingClientRect();
+  if(pinch.d>0) zoomAt(m.x-r.left, m.y-r.top, d/pinch.d); pinch.d=d; } },{passive:false});
+CV.addEventListener("touchend",ev=>{ if(ev.touches.length<2) pinch=null; });
+
+// Safari trackpad pinch (WebKit gesture events; ignored elsewhere).
+let gscale=1;
+CV.addEventListener("gesturestart",ev=>{ ev.preventDefault(); gscale=1; });
+CV.addEventListener("gesturechange",ev=>{ ev.preventDefault();
+  const r=CV.getBoundingClientRect();
+  if(gscale>0) zoomAt(ev.clientX-r.left, ev.clientY-r.top, ev.scale/gscale); gscale=ev.scale; });
+CV.addEventListener("gestureend",ev=>ev.preventDefault());
 
 // ---------- controls ----------
 function syncLabels(){
