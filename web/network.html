@@ -139,6 +139,14 @@
   .modbar span{display:block;min-width:1px}
   .modsig{font-size:11px;margin-top:3px;color:var(--accent);font-weight:600}
   .modsig span{color:var(--muted);font-weight:400}
+  /* export menu */
+  .menu{position:relative}
+  .menulist{position:absolute;top:calc(100% + 6px);right:0;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;box-shadow:var(--shadow);padding:5px;display:none;flex-direction:column;min-width:230px;z-index:15}
+  .menulist.open{display:flex}
+  .menulist button{background:none;border:0;text-align:left;padding:8px 10px;border-radius:7px;cursor:pointer;
+    color:var(--ink);font:inherit;font-size:12.5px}
+  .menulist button:hover{background:var(--line2)}
 </style>
 </head>
 <body>
@@ -146,6 +154,15 @@
   <div class="brand"><b>xscalenet</b><span>network browser</span></div>
   <div class="grow"></div>
   <button class="btn" id="importbtn" title="Reconstruct a network from a raw matrix (needs the local xscalenet-web server)">⬆ Import data</button>
+  <div class="menu">
+    <button class="btn" id="exportbtn">⬇ Export ▾</button>
+    <div class="menulist" id="exportmenu">
+      <button data-x="png">PNG — current view</button>
+      <button data-x="nodes">Nodes CSV (metrics, module, ATC)</button>
+      <button data-x="edges">Edges CSV (filtered view)</button>
+      <button data-x="graph">graph.json (+ layout &amp; modules)</button>
+    </div>
+  </div>
   <label class="btn"><input type="file" id="file" accept=".json,application/json"> Load graph.json</label>
   <button class="btn" id="sim" title="Run a live force simulation that re-flows the layout as you filter">⚛ Simulate</button>
 </header>
@@ -1067,8 +1084,36 @@ function exportEgo(){ if(!selected.size) return;
     edges: edges.filter(e=>ids.has(nodes[e.a].id)&&ids.has(nodes[e.b].id))
       .map(e=>({source:nodes[e.a].id, target:nodes[e.b].id, ecorr:e.ecorr, score:e.score})) };
   download(JSON.stringify(sub), `ego_${nodes[[...selected][0]].id}.json`); flash(`Exported ${sub.nodes.length} nodes / ${sub.edges.length} edges`); }
-function download(text, name){ const b=new Blob([text],{type:"application/json"}), a=document.createElement("a");
+function download(text, name, type){ downloadBlob(new Blob([text],{type:type||"application/json"}), name); }
+function downloadBlob(b, name){ const a=document.createElement("a");
   a.href=URL.createObjectURL(b); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+
+// ---------- exports ----------
+function csvCell(v){ if(v==null) return ""; v=String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function exportPNG(){
+  const tmp=document.createElement("canvas"); tmp.width=CV.width; tmp.height=CV.height;
+  const tc=tmp.getContext("2d"); tc.fillStyle=COL.bg||"#fff"; tc.fillRect(0,0,tmp.width,tmp.height); tc.drawImage(CV,0,0);
+  tmp.toBlob(b=>{ downloadBlob(b,"network.png"); flash("Exported PNG"); });
+}
+function exportNodesCSV(){
+  const annKeys=[]; const seen=new Set();
+  nodes.forEach(n=>Object.keys(n).forEach(k=>{ if(typeof n[k]==="string" && !["id","color","module"].includes(k) && !seen.has(k)){ seen.add(k); annKeys.push(k); } }));
+  const metrics=["degree","betweenness","closeness","clustering","community","module","atc","atc_last"];
+  const cols=["id",...annKeys,...metrics.filter(m=>nodes.some(n=>n[m]!=null))];
+  const rows=[cols.join(",")];
+  for(const n of nodes){ rows.push(cols.map(c=> c==="degree"?csvCell(VIS.deg[n.i]??n.degree):csvCell(n[c])).join(",")); }
+  download(rows.join("\n"), "nodes.csv", "text/csv"); flash(`Exported ${nodes.length} nodes`);
+}
+function exportEdgesCSV(){
+  const rows=["source,target,ecorr,score,orient"];
+  for(const e of VIS.edges) rows.push([csvCell(nodes[e.a].id),csvCell(nodes[e.b].id),csvCell(e.ecorr),csvCell(e.score),csvCell(e.orient)].join(","));
+  download(rows.join("\n"), "edges_filtered.csv", "text/csv"); flash(`Exported ${VIS.edges.length} edges (filtered)`);
+}
+function exportGraphJSON(){
+  const g=JSON.parse(JSON.stringify(baseGraph||G)); const byId={}; nodes.forEach(n=>byId[n.id]=n);
+  (g.nodes||[]).forEach(nd=>{ const c=byId[nd.id]; if(c){ if(c.module) nd.module=c.module; nd.x=c.x; nd.y=-c.y; } });
+  download(JSON.stringify(g), "graph.json"); flash("Exported graph.json (with layout + modules)");
+}
 function flash(msg){ const b=$("#badge"), old=b.dataset.title||b.innerHTML; b.dataset.title=old;
   b.style.display=""; b.innerHTML=`<b>${msg}</b>`; clearTimeout(flash._t);
   flash._t=setTimeout(()=>{ b.innerHTML=b.dataset.title; delete b.dataset.title; }, 1500); }
@@ -1197,6 +1242,11 @@ $("#moddetect").onclick=detectModules;
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modenrich").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
+$("#exportbtn").onclick=e=>{ e.stopPropagation(); $("#exportmenu").classList.toggle("open"); };
+document.addEventListener("click", ()=>$("#exportmenu").classList.remove("open"));
+$("#exportmenu").onclick=e=>{ const x=e.target.dataset?.x; if(!x)return;
+  $("#exportmenu").classList.remove("open");
+  ({png:exportPNG, nodes:exportNodesCSV, edges:exportEdgesCSV, graph:exportGraphJSON})[x]?.(); };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)

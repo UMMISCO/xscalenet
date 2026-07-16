@@ -36,6 +36,13 @@ The demo is the exact graph `J` + membership `m0` that xscalenet validates
 against R (`src/atc.rs::matches_r_dynamic_propagation`): 10 nodes, 3 themes
 (brown / black / yellow), converging at step 2.
 
+### Exports
+
+**⬇ Export** (header) → **PNG** of the current view · **Nodes CSV** (every
+annotation column + degree/betweenness/community/module/ATC) · **Edges CSV** of
+the *filtered* view · **graph.json** carrying the current layout + module
+assignment (re-loadable to restore both).
+
 ## reconstruction server — `xscalenet-web`
 
 To reconstruct a network **from a raw matrix** inside the browser, run the local
