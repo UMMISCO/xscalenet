@@ -114,6 +114,11 @@ graphs:
   **Fisher exact test + Benjamini-Hochberg** (a phylum-pure Bacillota module
   resolves to e.g. "▲ Lachnospiraceae · family · q=3e-17"). Click a module to
   isolate it. `?modules=1` deep-links a coloured partition.
+- **Spectral subgraphs** — for a network reconstructed by `xscalenet-web`, the
+  graph carries the **overlapping subgraphs the spectral embedding reconstructed
+  and fused** (the SCS core — "the subnetworks that made it": 2·(k−1) node
+  subsets, pos/neg per eigenvector). Scrub through them to isolate each on the
+  network (`?subg=N`).
 - **Taxonomic layers** — collapse the species network to any rank (genus →
   phylum): each node becomes a taxon at its members' layout centroid, sized by
   number of species, with between-taxa edges (width ∝ number of species-edges).

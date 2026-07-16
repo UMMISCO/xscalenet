@@ -228,6 +228,18 @@
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
     </div>
 
+    <div class="sec" id="subgsec" style="display:none">
+      <h2>Spectral subgraphs <span class="hint" id="subgnote"></span></h2>
+      <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”. Scrub to isolate each.</div>
+      <div class="trow" style="display:flex;align-items:center;gap:8px;margin-top:9px">
+        <button class="btn" id="subgprev" style="padding:5px 9px">‹</button>
+        <input type="range" id="subgscrub" min="0" max="0" value="0" step="1" style="flex:1">
+        <button class="btn" id="subgnext" style="padding:5px 9px">›</button>
+        <span class="lh" style="min-width:44px;text-align:right"><b id="subglabel">—</b></span>
+      </div>
+      <div class="rec" id="subginfo" style="margin-top:8px"></div>
+    </div>
+
     <div class="sec" id="layersec" style="display:none">
       <h2>Taxonomic layer</h2>
       <select id="layer"></select>
@@ -308,6 +320,7 @@ let view={x:0,y:0,k:1}, dpr=1, hot=-1, hotEdge=null, dragging=null, panning=null
 let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
 let focusLabel="", focusKey="";   // human label + identity of the current focus
+let subgraphs=[], subgIdx=-1;     // spectral subgraphs (each = {eigenvector,sign,nodes:[idx]})
 let down=null;            // pointer-down bookkeeping (to tell a click from a drag)
 let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
 let sizeBy="degree", sizeMax={};
@@ -462,7 +475,9 @@ function load(g){
       if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); }
       apply(); showInfo(); } }
   if(q.get("import")) $("#importbtn").click();
+  setupSubgraphs();
   if(q.get("modules")) detectModules();
+  if(q.get("subg")!=null && subgraphs.length) focusSubgraph(+q.get("subg"));
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
@@ -883,6 +898,29 @@ function focusModule(mid){
   const set=new Set(); nodes.forEach(nd=>{ if(nd.module===mid) set.add(nd.i); });
   if(!set.size) return; focus=set; focusKey="mod:"+mid; focusLabel="module "+mid;
   selected=new Set(); apply(); updateFocusChip(); showInfo();
+}
+// isolate one spectral subgraph (the node subset that was reconstructed & fused)
+function focusSubgraph(j){
+  const sg=subgraphs[j]; if(!sg) return; subgIdx=j;
+  focus=new Set(sg.nodes.filter(i=>i>=0 && i<nodes.length));
+  focusKey="subg:"+j; focusLabel=`subgraph EV${sg.eigenvector} ${sg.sign}`;
+  selected=new Set();
+  $("#subgscrub").value=j; $("#subglabel").textContent=`${j+1}/${subgraphs.length}`;
+  apply(); updateFocusChip(); showInfo();
+  // dominant taxon + how many of its induced edges survived into the consensus
+  const ms=[...focus].map(i=>nodes[i]); const pc={};
+  ms.forEach(nd=>{ const p=nd.phylum_group||nd.phylum||"—"; pc[p]=(pc[p]||0)+1; });
+  const dom=Object.entries(pc).sort((a,b)=>b[1]-a[1])[0]||["—",0];
+  $("#subginfo").innerHTML=`EV ${sg.eigenvector} · ${sg.sign} · <b>${focus.size}</b> nodes · `+
+    `${VIS.edges.length} induced edges · dominant <b>${dom[0]}</b> ${Math.round(100*dom[1]/focus.size)}%`;
+}
+function setupSubgraphs(){
+  subgraphs=(G.subgraphs||[]); subgIdx=-1;
+  const sec=$("#subgsec");
+  if(subgraphs.length){ sec.style.display="";
+    $("#subgnote").textContent=`${subgraphs.length} · k=${G.meta?.k??"?"}`;
+    $("#subgscrub").max=subgraphs.length-1; $("#subgscrub").value=0; $("#subglabel").textContent="—"; $("#subginfo").textContent="";
+  } else sec.style.display="none";
 }
 
 // ---------- render ----------
@@ -1397,6 +1435,9 @@ function tickProp(){ if(!prop.playing) return;
 $("#layout2").onchange=e=>applyLayout(e.target.value);
 $("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) startSim(); };
+$("#subgscrub").oninput=e=>focusSubgraph(+e.target.value);
+$("#subgprev").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.max(0,(subgIdx<0?0:subgIdx-1))); };
+$("#subgnext").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.min(subgraphs.length-1,(subgIdx<0?0:subgIdx+1))); };
 $("#moddetect").onclick=detectModules;
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
@@ -1496,7 +1537,8 @@ addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
 
 resize();
 if(location.protocol.startsWith("http")){
-  fetch("scapis.graph.json").then(r=>r.ok?r.json():Promise.reject())
+  const gfile=new URLSearchParams(location.search).get("graph")||"scapis.graph.json";
+  fetch(gfile).then(r=>r.ok?r.json():Promise.reject())
     .then(g=>{ resize(); loadBase(g); })
     .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”. The SCAPIS demo (<code>scapis.graph.json</code>) is client data and is not bundled in the repo.</span>'; });
 } else {

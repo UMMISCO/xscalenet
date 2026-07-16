@@ -121,6 +121,10 @@ pub struct PipelineResult {
     /// `consensus[threshold_i]`.
     pub consensus: Vec<Consensus>,
     pub spectral: SpectralStats,
+    /// The spectral subgraphs that were reconstructed and fused into the network:
+    /// each is a list of node indices (`nodes`), in order `pos, neg` per
+    /// eigenvector 1..k. Surfaced so a UI can show "the subnetworks that made it".
+    pub subgraphs: Vec<Vec<usize>>,
 }
 
 fn opt(x: f64) -> Option<f64> {

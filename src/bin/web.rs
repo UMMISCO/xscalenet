@@ -291,9 +291,23 @@ fn build_graph_json(
         json!({ "annotation": color_by, "n_iterations": tr.coinertia.len(), "steps": steps })
     });
 
+    // Spectral subgraphs that were reconstructed and fused into this network —
+    // "the subnetworks that made it". `nodes` are indices into `nodes` above.
+    let subgraphs_json: Vec<Value> = result
+        .subgraphs
+        .iter()
+        .enumerate()
+        .map(|(j, sg)| json!({
+            "eigenvector": j / 2 + 1,
+            "sign": if j % 2 == 0 { "pos" } else { "neg" },
+            "nodes": sg,
+        }))
+        .collect();
+
     let graph = json!({
         "meta": { "title": format!("Imported — {fname}"), "source": "xscalenet reconstruction",
-            "directed": false, "color_by": color_by, "n_nodes": n, "n_edges": net.edges.len() },
+            "directed": false, "color_by": color_by, "n_nodes": n, "n_edges": net.edges.len(),
+            "k": result.spectral.k, "subset_m": result.spectral.subset_m },
         "color_groups": color_groups,
         "color_map": Value::Object(color_map),
         "themes": themes,
@@ -301,6 +315,7 @@ fn build_graph_json(
         "nodes": nodes_json,
         "edges": edges_json,
         "atc_trace": atc_trace,
+        "subgraphs": subgraphs_json,
     });
     Ok(serde_json::to_string(&graph).unwrap())
 }

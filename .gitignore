@@ -4,3 +4,5 @@ target/
 out/
 web/scapis.graph.json
 .DS_Store
+web/scapis2417.graph.json
+web/s250.graph.json

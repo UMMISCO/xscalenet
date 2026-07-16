@@ -88,5 +88,6 @@ pub fn run(
             subset_m: prep.subset_m,
             n_subgraphs: prep.subgraphs.len(),
         },
+        subgraphs: prep.subgraphs,
     })
 }
