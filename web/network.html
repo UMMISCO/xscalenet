@@ -128,6 +128,15 @@
   #importbox .ck{display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer}
   #importbox .impacts{display:flex;align-items:center;gap:10px;margin-top:18px;flex-wrap:wrap}
   #impstatus{font-size:12.5px}
+  /* module list with taxonomy composition bars */
+  .modrow{padding:4px 4px 5px;border-radius:6px;cursor:pointer}
+  .modrow:hover{background:var(--line2)}
+  .modhead{display:grid;grid-template-columns:11px 1fr auto;align-items:center;gap:7px;font-size:12px}
+  .modhead .dot{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+  .modhead .nm i{color:var(--muted);font-size:11px}
+  .modhead b{font-variant-numeric:tabular-nums}
+  .modbar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:3px}
+  .modbar span{display:block;min-width:1px}
 </style>
 </head>
 <body>
@@ -173,6 +182,8 @@
       <h2>Modularity <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
+        <input type="checkbox" id="modfiltered"> on the filtered view only</label>
       <button class="btn primary" id="moddetect" style="width:100%;margin-top:8px;justify-content:center">Detect modules (Louvain)</button>
       <div class="hint" id="modhint" style="margin-top:7px">Partition the network into communities that maximise modularity, then colour by module.</div>
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
@@ -414,7 +425,7 @@ function buildColors(){
     groups=G.color_groups.slice(); gcolor={...G.color_map};
   } else {
     const cnt={};
-    for(const n of nodes){ const v=n[colorField]||"NA"; cnt[v]=(cnt[v]||0)+1; }
+    for(const n of legendNodes()){ const v=n[colorField]||"NA"; cnt[v]=(cnt[v]||0)+1; }
     groups=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]);
     const PAL=["#2f6df6","#3fb950","#db6d28","#a371f7","#e3b341","#e5534b","#39c5cf","#db61a2",
                "#7ee787","#ffa657","#79c0ff","#d2a8ff","#f0883e","#56d364","#bc8cff","#8b949e"];
@@ -422,6 +433,9 @@ function buildColors(){
   }
   offGroups.clear(); drawLegend();
 }
+// modules may be computed on the filtered view — then only visible nodes carry a
+// module, so count/legend over the visible set for that field.
+function legendNodes(){ return colorField==="module" ? nodes.filter(n=>VIS.visN.has(n.i)) : nodes; }
 function groupOf(n){ return n[colorField]||"NA"; }
 function colorOf(n){
   if(prop.step!=null) return propColor(n.i);
@@ -429,7 +443,7 @@ function colorOf(n){
 }
 
 function drawLegend(){
-  const cnt={}; nodes.forEach(n=>{const v=groupOf(n);cnt[v]=(cnt[v]||0)+1;});
+  const cnt={}; legendNodes().forEach(n=>{const v=groupOf(n);cnt[v]=(cnt[v]||0)+1;});
   $("#legend").innerHTML=groups.map(g0=>
     `<div class="li ${offGroups.has(g0)?'off':''}" data-g="${g0}">
       <span class="sw" style="background:${gcolor[g0]}"></span>${g0||'NA'}<span class="c">${cnt[g0]||0}</span></div>`).join("");
@@ -643,40 +657,55 @@ function louvainRun(n0, adj0, k0, m2){
   }
   return mapping;
 }
+// colour for a taxon (phylum) — reuse the graph's taxonomy palette when present
+const TAXPAL=["#2f6df6","#3fb950","#db6d28","#a371f7","#e3b341","#e5534b","#39c5cf","#db61a2","#7ee787","#ffa657","#79c0ff"];
+function taxColor(pg){
+  if(G.color_map && G.color_map[pg]) return G.color_map[pg];
+  if(pg==="—"||pg==="NA"||pg==="Unclassified") return "#c9ced6";
+  let h=0; for(let i=0;i<pg.length;i++) h=(h*31+pg.charCodeAt(i))>>>0; return TAXPAL[h%TAXPAL.length];
+}
+function taxonOf(nd){ return nd.phylum_group||nd.phylum||"—"; }
 function detectModules(){
-  const weighted=$("#modweight").checked, n=nodes.length;
-  const adj=Array.from({length:n},()=>[]); const k=new Float64Array(n); let m2=0;
+  const weighted=$("#modweight").checked, onFiltered=$("#modfiltered").checked;
+  const pool = onFiltered ? [...VIS.visN] : nodes.map(n=>n.i);
+  if(pool.length<2){ $("#modq").textContent="(too few nodes)"; return; }
+  const inPool=new Set(pool), loc=new Map(); pool.forEach((gi,i)=>loc.set(gi,i));
+  const n=pool.length, adj=Array.from({length:n},()=>[]), k=new Float64Array(n); let m2=0;
   const ew=e=> weighted ? (Math.abs(e.ecorr)||1) : 1;
-  for(const e of edges){ if(e.a===e.b) continue; const w=ew(e);
-    adj[e.a].push([e.b,w]); adj[e.b].push([e.a,w]); k[e.a]+=w; k[e.b]+=w; m2+=2*w; }
-  if(m2===0){ $("#modq").textContent="(no edges)"; return; }
+  const es=(onFiltered?VIS.edges:edges).filter(e=>inPool.has(e.a)&&inPool.has(e.b));
+  for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b),w=ew(e);
+    adj[a].push([b,w]); adj[b].push([a,w]); k[a]+=w; k[b]+=w; m2+=2*w; }
+  if(m2===0){ $("#modq").textContent="(no edges in view)"; return; }
   const map=louvainRun(n, adj, k, m2);
-  // rank communities by size → M1 is the largest
   const size={}; for(let i=0;i<n;i++) size[map[i]]=(size[map[i]]||0)+1;
   const order=Object.keys(size).map(Number).sort((a,b)=>size[b]-size[a]);
   const rank=new Map(); order.forEach((c,i)=>rank.set(c,i+1));
-  nodes.forEach(nd=>{ nd.module="M"+rank.get(map[nd.i]); });
+  nodes.forEach(nd=>{ nd.module = inPool.has(nd.i) ? "M"+rank.get(map[loc.get(nd.i)]) : undefined; });
   // modularity Q = Σ_c [ Σin_c/m2 − (Σtot_c/m2)² ]
   const nC=order.length, sumIn=new Float64Array(nC+1), sumTot=new Float64Array(nC+1);
-  nodes.forEach(nd=>{ sumTot[rank.get(map[nd.i])]+=k[nd.i]; });
-  for(const e of edges){ if(e.a===e.b) continue; if(map[e.a]===map[e.b]) sumIn[rank.get(map[e.a])]+=2*ew(e); }
+  for(let i=0;i<n;i++) sumTot[rank.get(map[i])]+=k[i];
+  for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b);
+    if(map[a]===map[b]) sumIn[rank.get(map[a])]+=2*ew(e); }
   let Q=0; for(let c=1;c<=nC;c++) Q+=sumIn[c]/m2 - (sumTot[c]/m2)**2;
-  $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} modules`;
+  $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} modules${onFiltered?" · filtered view":""}`;
   $("#modhint").style.display="none";
-  // add a "module" colour option and colour by it
   if(!$("#colorby").querySelector('option[value=module]')){
     const o=document.createElement("option"); o.value="module"; o.textContent="module (Louvain)"; $("#colorby").appendChild(o); }
   colorField="module"; $("#colorby").value="module"; buildColors(); apply();
-  // module list (top by size), click to focus
-  const byMod={}; nodes.forEach(nd=>{ (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
-  const mids=order.map((_,i)=>"M"+(i+1)).slice(0,15);
+  // module list with taxonomy composition (cross modules × taxonomy)
+  const hasTax=nodes.some(nd=>nd.phylum_group||nd.phylum);
+  const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
+  const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
-    const pc={}; ms.forEach(nd=>{ const p=nd.phylum_group||nd.phylum||"—"; pc[p]=(pc[p]||0)+1; });
-    const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0]||"";
-    return `<div class="nbr" onclick="focusModule('${mid}')" title="focus ${mid}">`+
-      `<span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
-      `<span class="nm">${mid} <i>${dom}</i></span><b>${ms.length}</b></div>`; }).join("")+
-    (order.length>15?`<div class="hint">+${order.length-15} more</div>`:"");
+    const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
+    const comp=Object.entries(pc).sort((a,b)=>b[1]-a[1]);
+    const dom=comp[0]||["—",0], homog=ms.length?Math.round(100*dom[1]/ms.length):0;
+    const bar=hasTax? `<div class="modbar">${comp.map(([p,c])=>
+        `<span style="flex:${c};background:${taxColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
+    return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid}">`+
+      `<div class="modhead"><span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
+      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}</div>`;
+  }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more modules</div>`:"");
 }
 function focusModule(mid){
   const set=new Set(); nodes.forEach(nd=>{ if(nd.module===mid) set.add(nd.i); });
@@ -1055,6 +1084,7 @@ $("#sim").onclick=()=> sim.on ? stopSim() : startSim();
 $("#autoflow").onchange=e=>{ autoFlow=e.target.checked; if(autoFlow && !sim.on) startSim(); };
 $("#moddetect").onclick=detectModules;
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
+$("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
