@@ -374,7 +374,7 @@ function load(g){
   if(trace.length && g.themes){
     ps.style.display="";
     $("#propnote").textContent=`by ${g.atc_trace.annotation||"annotation"}`;
-    $("#propintro").innerHTML=`Watch the ${g.themes.length} theme weights T<sup>p</sup> diffuse across the network. Node colour blends its theme mix; off = taxonomy colour.`;
+    $("#propintro").innerHTML=`Watch the ${g.themes.length} theme weights T<sup>p</sup> diffuse. Node size = ATC accrued so far; colour blends the theme mix <b>when coloured by ${g.atc_trace.annotation||"the annotation"}</b> (otherwise your colouring is kept).`;
     $("#propscrub").max=trace.length-1; $("#propscrub").value=0;
     $("#propstep").textContent="off";
     $("#propinfo").textContent="";
@@ -439,7 +439,10 @@ function buildColors(){
 function legendNodes(){ return colorField==="module" ? nodes.filter(n=>VIS.visN.has(n.i)) : nodes; }
 function groupOf(n){ return n[colorField]||"NA"; }
 function colorOf(n){
-  if(prop.step!=null) return propColor(n.i);
+  // During propagation, blend by the theme mix ONLY when colouring by the ATC
+  // annotation itself; otherwise (module, family, …) keep the chosen colour so
+  // it isn't overwritten — only the node size animates.
+  if(prop.step!=null && colorField===(G.atc_trace&&G.atc_trace.annotation)) return propColor(n.i);
   return gcolor[groupOf(n)]||n.color||"#8b949e";
 }
 
