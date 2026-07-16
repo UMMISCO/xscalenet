@@ -32,12 +32,17 @@ fn main() {
         index.insert(nd["id"].as_str().unwrap().to_string(), i);
     }
 
+    // Missing-taxonomy tokens are NOT themes — a node labelled with one of these
+    // is treated as *unannotated* (None), so it doesn't seed a (often singleton)
+    // pseudo-theme that then dominates the dist-co-inertia ATC by construction.
+    let is_missing = |s: &str| matches!(s, "NA" | "Unclassified" | "unclassified" | "" | "unknown" | "Unknown");
+
     // ---- themes: reuse color_groups/color_map when they describe this field --
     let (themes, theme_colors): (Vec<String>, Vec<String>) = if g.get("color_groups").is_some()
         && g["meta"].get("color_by").and_then(|v| v.as_str()) == Some(field.as_str())
     {
         let groups: Vec<String> = g["color_groups"].as_array().unwrap().iter()
-            .map(|v| v.as_str().unwrap().to_string()).collect();
+            .map(|v| v.as_str().unwrap().to_string()).filter(|s| !is_missing(s)).collect();
         let colors = groups.iter()
             .map(|gp| g["color_map"][gp].as_str().unwrap_or("#888888").to_string()).collect();
         (groups, colors)
@@ -49,7 +54,7 @@ fn main() {
             let v = nd[field].as_str().unwrap_or("NA").to_string();
             *freq.entry(v).or_default() += 1;
         }
-        let mut gs: Vec<String> = freq.keys().cloned().collect();
+        let mut gs: Vec<String> = freq.keys().cloned().filter(|s| !is_missing(s)).collect();
         gs.sort_by_key(|k| std::cmp::Reverse(freq[k]));
         let pal = ["#2f6df6","#3fb950","#db6d28","#a371f7","#e3b341","#e5534b","#39c5cf","#db61a2"];
         let cs = (0..gs.len()).map(|i| pal[i % pal.len()].to_string()).collect();
