@@ -111,9 +111,9 @@
     border-radius:20px;padding:6px 8px 6px 13px;box-shadow:var(--shadow);display:none;align-items:center;
     gap:9px;font-size:12.5px;z-index:6}
   #focuschip b{color:var(--accent)}
-  #focuschip .x{cursor:pointer;border:0;background:var(--line2);color:var(--ink);border-radius:50%;
-    width:20px;height:20px;line-height:18px;text-align:center;font-size:13px}
-  #focuschip .x:hover{background:var(--neg);color:#fff}
+  #focuschip .x{cursor:pointer;border:1px solid var(--line);background:var(--accent);color:#fff;
+    border-radius:14px;padding:4px 11px;font:inherit;font-size:12px;font-weight:600}
+  #focuschip .x:hover{filter:brightness(1.08)}
   /* import modal */
   #importmask{position:fixed;inset:0;background:rgba(10,15,25,.45);display:none;align-items:center;
     justify-content:center;z-index:20;backdrop-filter:blur(2px)}
@@ -152,7 +152,7 @@
   <div id="stage">
     <canvas id="cv"></canvas>
     <div class="badge" id="badge"></div>
-    <div id="focuschip"><span id="focustext"></span><button class="x" id="focusclear" title="Clear focus">✕</button></div>
+    <div id="focuschip"><span id="focustext"></span><button class="x" id="focusclear" title="Exit focus — show the whole network (Esc)">✕ Show all</button></div>
     <div id="tip"></div>
   </div>
   <aside>
@@ -264,6 +264,7 @@ let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
 let view={x:0,y:0,k:1}, dpr=1, hot=-1, dragging=null, panning=null, offGroups=new Set();
 let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
+let focusLabel="", focusKey="";   // human label + identity of the current focus
 let down=null;            // pointer-down bookkeeping (to tell a click from a drag)
 let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
 let sizeBy="degree", sizeMax={};
@@ -410,7 +411,7 @@ function load(g){
   if(q.get("sim")||q.get("relayout")){ startSim(); }
   if(q.get("prop")!=null && trace.length){ setProp(+q.get("prop")); }
   if(q.get("select") && idx[q.get("select")]!=null){ selected=new Set([idx[q.get("select")]]);
-    if(q.get("focus")) focus=egoIndices([...selected], edges); apply(); }
+    if(q.get("focus")){ focus=egoIndices([...selected], edges); focusKey="ego"; focusLabel="ego-network of "+q.get("select"); } apply(); }
   if(q.get("import")) $("#importbtn").click();
   if(q.get("modules")) detectModules();
   const b=$("#badge");
@@ -708,8 +709,10 @@ function detectModules(){
   }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more modules</div>`:"");
 }
 function focusModule(mid){
+  if(focusKey==="mod:"+mid){ clearFocus(); return; }   // click the focused module again → show all
   const set=new Set(); nodes.forEach(nd=>{ if(nd.module===mid) set.add(nd.i); });
-  if(!set.size) return; focus=set; selected=new Set(); apply(); updateFocusChip(); showInfo();
+  if(!set.size) return; focus=set; focusKey="mod:"+mid; focusLabel="module "+mid;
+  selected=new Set(); apply(); updateFocusChip(); showInfo();
 }
 
 // ---------- render ----------
@@ -943,9 +946,11 @@ function neighborList(i){
     `<div class="nbrs">${rows}</div>`+(nb.length>cap?`<div class="hint">+${nb.length-cap} more</div>`:"");
 }
 // actions
-function focusSel(){ if(!selected.size) return; focus=egoIndices([...selected], edges); apply(); updateFocusChip(); showInfo(); }
-function expandFocus(){ if(!focus) return; focus=egoIndices([...focus], edges); apply(); updateFocusChip(); showInfo(); }
-function clearFocus(){ focus=null; apply(); updateFocusChip(); showInfo(); }
+function focusSel(){ if(!selected.size) return; focus=egoIndices([...selected], edges);
+  focusKey="ego"; focusLabel=selected.size===1?("ego-network of "+nodes[[...selected][0]].id):(selected.size+" nodes + neighbours");
+  apply(); updateFocusChip(); showInfo(); }
+function expandFocus(){ if(!focus) return; focus=egoIndices([...focus], edges); focusKey="ego"; focusLabel="expanded neighbourhood"; apply(); updateFocusChip(); showInfo(); }
+function clearFocus(){ focus=null; focusKey=""; focusLabel=""; apply(); updateFocusChip(); showInfo(); }
 function selectSame(){ const i=selRepr(); if(i<0) return; const g=groupOf(nodes[i]);
   nodes.forEach(n=>{ if(groupOf(n)===g) selected.add(n.i); }); showInfo(); render(); }
 function copyNode(){ const i=selRepr(); if(i<0) return; const n=nodes[i];
@@ -966,8 +971,9 @@ function flash(msg){ const b=$("#badge"), old=b.dataset.title||b.innerHTML; b.da
   b.style.display=""; b.innerHTML=`<b>${msg}</b>`; clearTimeout(flash._t);
   flash._t=setTimeout(()=>{ b.innerHTML=b.dataset.title; delete b.dataset.title; }, 1500); }
 function updateFocusChip(){ const c=$("#focuschip");
-  if(focus){ c.style.display="flex"; $("#focustext").innerHTML=`Focused · <b>${VIS.visN.size}</b> nodes`; }
-  else c.style.display="none"; }
+  if(focus){ c.style.display="flex";
+    $("#focustext").innerHTML=`Focused: ${focusLabel||"subset"} · <b>${VIS.visN.size}</b> nodes &nbsp;`; }
+  else { c.style.display="none"; focusLabel=""; focusKey=""; } }
 function row2(k,v){ return v==null||v===""?"":`<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`; }
 // dominant theme (and share) of node i at the current propagation step
 function themeMix(i){
