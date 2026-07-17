@@ -78,13 +78,18 @@ fn main() {
     let graph = Graph { n, adj };
 
     // ---- propagate ----------------------------------------------------------
+    // The step-by-step trace is nodes×themes×steps — huge and illegible past a
+    // few dozen themes (e.g. 618 flickr tags → ~50 MB). Bake the per-node ATC
+    // SCORES always, but only capture the trace (for the propagation player) when
+    // the theme count is small enough to be meaningful.
+    const TRACE_MAX_THEMES: usize = 40;
+    let want_trace = themes.len() <= TRACE_MAX_THEMES;
     let t0 = atc::membership_from_labels(&labels, themes.len());
     let cfg = AtcConfig { weighted: false, self_loop: true, coinertia_threshold: 0.999,
-        max_iter: 20, capture_trace: true };
+        max_iter: 20, capture_trace: want_trace };
     let res = atc::compute(&graph, &t0, &cfg);
-    let trace = res.trace.expect("trace");
 
-    // ---- write back: per-node scores + themes + trace -----------------------
+    // ---- write back: per-node scores + themes (+ trace when small) ----------
     let mut nodes = nodes;
     for (i, nd) in nodes.iter_mut().enumerate() {
         nd["atc"] = json!(round6(res.atc[i]));
@@ -93,25 +98,31 @@ fn main() {
     g["nodes"] = Value::Array(nodes);
     g["themes"] = json!(themes);
     g["theme_colors"] = json!(theme_colors);
-
-    let steps: Vec<Value> = (0..trace.configs.len()).map(|p| {
-        let config: Vec<Vec<f64>> = trace.configs[p].iter()
-            .map(|row| row.iter().map(|&x| round6(x)).collect()).collect();
-        if p == 0 {
-            json!({ "step": p, "coinertia": Value::Null, "config": config, "delta": Value::Null })
-        } else {
-            let delta: Vec<f64> = trace.delta[p - 1].iter().map(|&x| round6(x)).collect();
-            json!({ "step": p, "coinertia": round6(trace.coinertia[p - 1]), "config": config, "delta": delta })
-        }
-    }).collect();
-    g["atc_trace"] = json!({ "annotation": field, "n_iterations": res.n_iterations, "steps": steps });
     if let Some(m) = g["meta"].as_object_mut() {
         m.insert("atc_annotation".into(), json!(field));
     }
 
+    let n_steps = match res.trace {
+        Some(trace) => {
+            let steps: Vec<Value> = (0..trace.configs.len()).map(|p| {
+                let config: Vec<Vec<f64>> = trace.configs[p].iter()
+                    .map(|row| row.iter().map(|&x| round6(x)).collect()).collect();
+                if p == 0 {
+                    json!({ "step": p, "coinertia": Value::Null, "config": config, "delta": Value::Null })
+                } else {
+                    let delta: Vec<f64> = trace.delta[p - 1].iter().map(|&x| round6(x)).collect();
+                    json!({ "step": p, "coinertia": round6(trace.coinertia[p - 1]), "config": config, "delta": delta })
+                }
+            }).collect();
+            g["atc_trace"] = json!({ "annotation": field, "n_iterations": res.n_iterations, "steps": steps });
+            trace.configs.len() - 1
+        }
+        None => res.n_iterations,   // scores only; no trace baked (too many themes)
+    };
+
     fs::write(&out, serde_json::to_string(&g).unwrap()).expect("write");
-    println!("enriched {out}: ATC by '{field}' over {} themes, {} propagation steps, {} nodes",
-        themes.len(), trace.configs.len() - 1, n);
+    println!("enriched {out}: ATC by '{field}' over {} themes, {} propagation steps ({}), {} nodes",
+        themes.len(), n_steps, if want_trace { "trace baked" } else { "scores only" }, n);
 }
 
 fn round6(x: f64) -> f64 {

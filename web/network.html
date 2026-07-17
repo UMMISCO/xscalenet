@@ -1132,7 +1132,7 @@ function drawStats(){
   h+=gh("Annotation")+
     row("colour by", colorField||"—", TAX_FIELDS.includes(colorField)?pill("GTDB"):(TRAIT_FIELDS.includes(colorField)?pill("MSP"):""))+
     row("colour groups", groups.length)+
-    (hasAtc?row("ATC", G.atc_trace?.annotation||"annotation", atcRecomputed?pill("recomputed","calc"):pill("engine")):"");
+    (hasAtc?row("ATC", (G.atc_trace&&G.atc_trace.annotation)||(G.meta&&G.meta.atc_annotation)||"annotation", atcRecomputed?pill("recomputed","calc"):pill("engine")):"");
   if(!onLayer){ const names={igraph:"igraph",force:"force-directed",circle:"circular",concentric:"concentric",grid:"grid"};
     h+=gh("View")+row("layout", names[currentLayout]||currentLayout,
       currentLayout==="igraph"?pill("igraph"):pill("computed","calc")); }
