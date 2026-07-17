@@ -113,7 +113,7 @@ def main():
     g = {
         "meta": {"title": f"Amazon co-purchase — {len(nodes)} products",
                  "source": "SNAP amazon0601 + amazon-meta", "directed": False,
-                 "color_by": "group",
+                 "color_by": "group", "annotation_source": "amazon-meta",
                  # aggregation ladder, base (full network) first, then fine → coarse
                  "ranks": ["product", "cat3", "cat2", "cat1", "group"]},
         "color_groups": groups, "color_map": color_map,

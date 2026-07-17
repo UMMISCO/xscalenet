@@ -107,7 +107,7 @@ def main():
     g = {
         "meta": {"title": f"Flickr image graph — {len(nodes)} photos",
                  "source": "SNAP flickrEdges + MIR tag features", "directed": False,
-                 "color_by": "tag", "ranks": ["photo", "tag"]},
+                 "color_by": "tag", "annotation_source": "MIR tags", "ranks": ["photo", "tag"]},
         "color_groups": tags, "color_map": color_map,
         "nodes": nodes, "edges": edges,
     }

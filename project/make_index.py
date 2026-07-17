@@ -17,13 +17,12 @@ def main():
         m = json.load(open(pj))
         entry = {k: m[k] for k in FIELDS if k in m}
         # mark whether the generated graph is actually present (servable)
-        entry["available"] = os.path.exists(os.path.join(WEB, m.get("graph", "")))
         projects.append(entry)
-    # available first, then by title
-    projects.sort(key=lambda p: (not p.get("available"), p.get("title", "")))
+    # reference/testnet first (small, always present), then by title
+    order={"testnet":0}
+    projects.sort(key=lambda p: (order.get(p.get("id"),1), p.get("title", "")))
     json.dump({"projects": projects}, open(OUT, "w"), indent=1)
-    print(f"wrote {os.path.abspath(OUT)} — {len(projects)} networks "
-          f"({sum(p['available'] for p in projects)} available)")
+    print(f"wrote {os.path.abspath(OUT)} — {len(projects)} networks")
 
 if __name__ == "__main__":
     main()

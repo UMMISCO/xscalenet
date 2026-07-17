@@ -1,0 +1,37 @@
+{
+ "projects": [
+  {
+   "id": "testnet",
+   "title": "ATC 10-node reference",
+   "domain": "reference",
+   "graph": "testnet.graph.json",
+   "color_by": "theme",
+   "note": "The R-validated 10-node test network (brown/black/yellow themes). The propagation reference; small, always available."
+  },
+  {
+   "id": "amazon",
+   "title": "Amazon co-purchase",
+   "domain": "e-commerce",
+   "graph": "amazon.graph.json",
+   "color_by": "group",
+   "note": "Products co-purchased; group (Book/Music/DVD/Video) \u2192 category hierarchy. On the cat2 functional layer, Louvain guilds separate music genres / book subjects / video."
+  },
+  {
+   "id": "flickr",
+   "title": "Flickr image graph",
+   "domain": "social / image",
+   "graph": "flickr.graph.json",
+   "color_by": "tag",
+   "note": "Photos sharing context; each photo's dominant MIR tag (sky / nikon / portrait \u2026) as its annotation."
+  },
+  {
+   "id": "scapis",
+   "title": "SCAPIS gut microbiome",
+   "domain": "microbiome",
+   "graph": "scapis2417.graph.json",
+   "color_by": "phylum",
+   "note": "2417 MSP, GTDB 220 taxonomy + MSP functional traits. Client data \u2014 not bundled in the repo.",
+   "client_data": true
+  }
+ ]
+}

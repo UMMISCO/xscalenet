@@ -1,0 +1,10 @@
+{
+  "id": "testnet",
+  "title": "ATC 10-node reference",
+  "domain": "reference",
+  "source": "Prifti et al. 2010 dynamicPropagation (R-validated)",
+  "graph": "testnet.graph.json",
+  "color_by": "theme",
+  "atc_by": "theme",
+  "note": "The R-validated 10-node test network (brown/black/yellow themes). The propagation reference; small, always available."
+}

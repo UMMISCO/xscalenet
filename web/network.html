@@ -183,6 +183,15 @@
   .search .results .r .dot{width:9px;height:9px;border-radius:50%}
   .search .results .r i{color:var(--muted);font-size:11px}
   .search .results .none{padding:8px 10px;color:var(--muted);font-size:12px}
+  /* "computing" overlay — shows a spinning cog while a heavy op runs */
+  #busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:20;
+    background:color-mix(in srgb, var(--bg) 55%, transparent);backdrop-filter:blur(1px)}
+  #busy.on{display:flex}
+  #busy .box{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:10px 14px;box-shadow:var(--shadow);font-size:12.5px;color:var(--ink)}
+  #busy .cog{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -215,6 +224,7 @@
 <div id="app">
   <div id="stage">
     <canvas id="cv"></canvas>
+    <div id="busy"><div class="box"><span class="cog"></span><span id="busytxt">computing…</span></div></div>
     <div class="badge" id="badge"></div>
     <div id="focuschip"><span id="focustext"></span><button class="x" id="focusclear" title="Exit focus — show the whole network (Esc)">✕ Show all</button></div>
     <div id="tip"></div>
@@ -403,6 +413,15 @@ function readColors(){
     muted:get('--muted','#6b7480'), bg:get('--bg','#f6f7f9')};
 }
 
+// Show a "computing…" spinner, let the browser paint it, then run the (synchronous,
+// possibly heavy) work off the current frame so the UI doesn't look frozen.
+function busy(msg, fn){
+  const el=$("#busy"); $("#busytxt").textContent=msg||"computing…"; el.classList.add("on");
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    try{ fn(); } catch(e){ console.error(e); } finally{ el.classList.remove("on"); }
+  }));
+}
+
 // ---------- taxonomic layer aggregation ----------
 function loadBase(g){
   baseGraph=g;
@@ -422,7 +441,10 @@ function loadBase(g){
   $("#layersec").style.display = present.length>1 ? "" : "none";
   load(layerRank===BASE_RANK ? g : funnetLayer(g, layerRank));
 }
-function applyLayer(){ load(layerRank===BASE_RANK ? baseGraph : funnetLayer(baseGraph, layerRank)); }
+function applyLayer(){
+  if(layerRank===BASE_RANK){ load(baseGraph); return; }
+  busy(`Building ${layerRank} functional layer…`, ()=>load(funnetLayer(baseGraph, layerRank)));
+}
 // Collapse the species graph to `rank`: one node per taxon at its members'
 // layout centroid; edges are between-taxa links (weight = #species-edges,
 // ecorr = mean). Colours/positions stay consistent with the full network.
@@ -984,10 +1006,14 @@ function drawLegend(){
 
 // ---------- filtering ----------
 function passEdge(e){
-  if(!isFinite(e.ecorr)) return false;
-  if(Math.abs(e.ecorr)<filt.ec) return false;
-  if(filt.sign==="pos"&&e.ecorr<0) return false;
-  if(filt.sign==="neg"&&e.ecorr>=0) return false;
+  const ae=Math.abs(e.ecorr);
+  if(isFinite(ae)){                                   // weighted edge — filter by |ecorr| / sign
+    if(ae<filt.ec) return false;
+    if(filt.sign==="pos"&&e.ecorr<0) return false;
+    if(filt.sign==="neg"&&e.ecorr>=0) return false;
+  } else if(filt.ec>0 || filt.sign!=="all"){          // unweighted edge, but a sign/ecorr filter is on
+    return false;
+  }
   if(isFinite(e.score)&&e.score<filt.sc) return false;
   return true;
 }
@@ -1713,19 +1739,29 @@ function inspect(i, pinned){
   const gh=(t,p)=>`<div class="gh">${t}${p||""}</div>`;
   const row=(k,v,p)=> (v==null||v==="")?"":`<div class="prow"><span class="pk">${k}</span><span class="pv">${v}${p||""}</span></div>`;
   const U=t=>`<span class="u">${t}</span>`;
-  const contam=isContaminant(n);
+  // Annotation is domain-specific: GTDB taxonomy only when the nodes actually carry
+  // it; else the declared hierarchy (meta.ranks); else just the colour-by field.
+  const hasRanks = G.meta && Array.isArray(G.meta.ranks);
+  const isTax = !hasRanks && nodes.some(x=>x.phylum||x.superkingdom||x.gtdb);
+  const annFields = isTax
+    ? ["superkingdom","phylum","class","order","family","genus","species"]
+    : hasRanks ? G.meta.ranks.filter(r=>r!==BASE_RANK).slice().reverse()   // coarse → fine
+    : (G.meta&&G.meta.color_by ? [G.meta.color_by] : []);
+  const annSrc = (G.meta && G.meta.annotation_source) ? G.meta.annotation_source : (isTax ? "GTDB" : null);
+  const contam = isTax && isContaminant(n);
   let h=`<h2>${isTaxon?"Taxon":"Node"} — ${n.id}${pinned?' <span style="color:var(--accent)">◉</span>':''}${contam?pill("contaminant?","warn"):""}</h2>`;
   if(n.label && !isTaxon && n.label!==n.id) h+=`<div style="margin:-2px 0 8px;font-style:italic;color:var(--muted)">${n.label}</div>`;
   if(pinned) h+=nodeActions(i);
   // Enrichment (functional layer taxa)
   if(n.enr_list?.length){ h+=gh("Enrichment", pill("Fisher·BH","calc"))+
     n.enr_list.map(e=>row(`▲ ${e.f}`, `${e.v==='1'?'+':e.v==='-1'?'−':e.v} ${U(e.a+'/'+e.nn+' · q='+fmtQ(e.q))}`)).join(""); }
-  // Taxonomy [GTDB]; uncertain assignments (sp. / unclassified) get an amber pill
-  const trow=k=>{ const v=n[k]; if(v==null||v==="") return "";
+  // Annotation — the node's real annotation fields; uncertain values get an amber pill.
+  const miss=v=>v==null||v===""||["NA","Unclassified","unclassified","unknown","Unknown","NaN"].includes(String(v));
+  const trow=k=>{ const v=n[k]; if(miss(v)) return "";
     return row(k, v, /(\bsp\.|unclassified|UBA|CAG-)/i.test(String(v))?pill("inferred","warn"):""); };
-  h+=gh("Taxonomy", pill("GTDB"))+
-    (isTaxon?row("species (members)", n.members):"")+
-    trow("superkingdom")+trow("phylum")+trow("class")+trow("order")+trow("family")+trow("genus")+trow("species");
+  h+=gh(isTax?"Taxonomy":"Annotation", annSrc?pill(annSrc):"")+
+    (isTaxon?row("members", n.members):"")+
+    annFields.map(trow).join("");
   // Function [MSP] — non-baseline traits
   const traits=["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0);
   if(traits.length) h+=gh("Function", pill("MSP"))+
@@ -2022,7 +2058,7 @@ function setProp(s){
   drawLegend(); render();
 }
 $("#propscrub").oninput=e=>{ if(prop.playing) playProp(); setProp(+e.target.value); };
-$("#atcrecompute").onclick=recomputeAtc;
+$("#atcrecompute").onclick=()=>busy("Recomputing ATC on the current view…", recomputeAtc);
 $("#propplay").onclick=()=>playProp();
 $("#propstyle").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   $("#propstyle").querySelectorAll("button").forEach(x=>x.classList.remove("on"));
@@ -2043,7 +2079,7 @@ $("#subgcov").onclick=toggleCoverage;
 $("#subgscrub").oninput=e=>focusSubgraph(+e.target.value);
 $("#subgprev").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.max(0,(subgIdx<0?0:subgIdx-1))); };
 $("#subgnext").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.min(subgraphs.length-1,(subgIdx<0?0:subgIdx+1))); };
-$("#moddetect").onclick=detectModules;
+$("#moddetect").onclick=()=>busy((layerRank!==BASE_RANK?"Detecting guilds":"Detecting modules")+" (Louvain)…", detectModules);
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modenrich").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
