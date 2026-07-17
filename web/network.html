@@ -2067,11 +2067,14 @@ $("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); }
 $("#sizeby").onchange=e=>{ sizeBy=e.target.value; render(); };
 // collapsible sidebar sections — click a header to fold/unfold; state is a global
 // UI preference, persisted in localStorage across graphs.
-function saveCollapse(){ try{ const c=[...document.querySelectorAll(".sec.cl.collapsed[data-sec]")].map(s=>s.dataset.sec);
-  localStorage.setItem("xsnet:collapsed", JSON.stringify(c)); }catch(e){} }
-function applyCollapse(){ let saved; try{ saved=JSON.parse(localStorage.getItem("xsnet:collapsed")||"null"); }catch(e){}
-  if(!saved) return; const set=new Set(saved);
-  document.querySelectorAll(".sec.cl[data-sec]").forEach(s=>s.classList.toggle("collapsed", set.has(s.dataset.sec))); }
+// store the full open/collapsed map so both expands and collapses are remembered
+// (and sections added later keep their HTML default).
+function saveCollapse(){ try{ const m={};
+  document.querySelectorAll(".sec.cl[data-sec]").forEach(s=>m[s.dataset.sec]=s.classList.contains("collapsed"));
+  localStorage.setItem("xsnet:collapsed:v2", JSON.stringify(m)); }catch(e){} }
+function applyCollapse(){ let m; try{ m=JSON.parse(localStorage.getItem("xsnet:collapsed:v2")||"null"); }catch(e){}
+  if(!m||typeof m!=="object") return;
+  document.querySelectorAll(".sec.cl[data-sec]").forEach(s=>{ if(s.dataset.sec in m) s.classList.toggle("collapsed", !!m[s.dataset.sec]); }); }
 $("aside").addEventListener("click", e=>{ const h2=e.target.closest("h2");
   if(h2 && h2.parentElement.classList.contains("cl")){ h2.parentElement.classList.toggle("collapsed"); saveCollapse(); } });
 applyCollapse();
