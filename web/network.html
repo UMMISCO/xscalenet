@@ -561,7 +561,9 @@ function recomputeAtc(){
   sizeBy="atc"; $("#sizeby").value="atc";
   $("#atcrecinfo").innerHTML=`↻ recomputed on <b>${nn}</b> nodes · ${VIS.edges.length} edges · `+
     `${m} themes (${annField})${weighted?" · weighted":""} · ${res.iterations} steps`;
-  buildColors(); apply(); showInfo();
+  // NB: don't call buildColors() here — it clears offGroups (legend exclusions),
+  // which would re-admit the very contaminants we finalized the topology without.
+  apply(); showInfo();
   flash(`ATC recomputed on the current topology (${nn} nodes, ${m} themes)`);
 }
 
