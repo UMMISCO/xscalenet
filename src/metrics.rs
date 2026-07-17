@@ -5,7 +5,10 @@
 //! global clustering, betweenness and closeness centrality (Brandes / BFS,
 //! parallel over sources), and modularity-based communities (Louvain).
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 use std::collections::VecDeque;
 
 use crate::network::Network;
@@ -213,6 +216,10 @@ fn transitivity(g: &Graph) -> f64 {
 /// Betweenness centrality (Brandes, unweighted, undirected), normalized to [0,1].
 fn betweenness(g: &Graph) -> Vec<f64> {
     let n = g.n;
+    // Brandes over every source; sources accumulate independently, so this is a
+    // per-source fold + sum reduction. Rayon's two-closure fold/reduce has no
+    // sequential analogue, so the single-thread build runs the plain fold.
+    #[cfg(feature = "parallel")]
     let bc = (0..n)
         .into_par_iter()
         .fold(
@@ -231,6 +238,14 @@ fn betweenness(g: &Graph) -> Vec<f64> {
                 a
             },
         );
+    #[cfg(not(feature = "parallel"))]
+    let bc = {
+        let mut acc = vec![0.0f64; n];
+        for s in 0..n {
+            brandes_source(g, s, &mut acc);
+        }
+        acc
+    };
     // Undirected: each pair counted twice; normalize by (n-1)(n-2).
     let norm = if n > 2 {
         (n as f64 - 1.0) * (n as f64 - 2.0)

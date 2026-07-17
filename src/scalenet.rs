@@ -3,7 +3,10 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 
 use crate::aracne;
 use crate::data::Dataset;

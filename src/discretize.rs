@@ -12,7 +12,10 @@
 //! (e.g. the `pop2mat` fixtures) are bit-identical to before. Columns are
 //! discretized in parallel.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 
 /// Above this core size a column is reduced to weighted representatives before
 /// clustering. At or below it, the exact unweighted PAM path runs unchanged.

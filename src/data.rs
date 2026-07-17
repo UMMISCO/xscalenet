@@ -6,7 +6,10 @@
 //! (for mutual information / Bayesian scoring) and, since the codes double as
 //! the numeric representation R uses, they are reused for the Spearman sign.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 use std::fs;
 use std::path::Path;
 

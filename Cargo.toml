@@ -16,12 +16,20 @@ path = "src/bin/web.rs"
 required-features = ["web"]
 
 [features]
+default = ["parallel"]
+# Multi-threaded core (Rayon). On by default; turn OFF for single-thread targets
+# like wasm32 (`--no-default-features --features wasm`), which use a sequential shim.
+parallel = ["dep:rayon"]
 # `xscalenet-web` server: axum + tokio + static file serving + JSON building.
-web = ["dep:axum", "dep:tokio", "dep:tower-http", "dep:serde_json"]
+web = ["parallel", "dep:axum", "dep:tokio", "dep:tower-http", "dep:serde_json"]
+# In-browser reconstruction: compile the core to wasm32 with wasm-bindgen glue.
+# Build with: `cargo build --lib --no-default-features --features wasm --target wasm32-unknown-unknown`.
+wasm = ["dep:wasm-bindgen", "dep:serde_json"]
 
 [dependencies]
 nalgebra = "0.33"
-rayon = "1.10"
+rayon = { version = "1.10", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 libm = "0.2"
 # Pure-Rust gzip (miniz_oxide backend) so `.gz` input works with no system deps.
 flate2 = "1"

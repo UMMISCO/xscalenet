@@ -3,7 +3,10 @@
 //! Reproduces `minet::build.mim(dataset, estimator = "mi.mm")`: pairwise MI,
 //! negative values clamped to 0, and a zeroed diagonal.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 
 /// Miller-Madow entropy of a discrete variable given its counts.
 ///

@@ -20,6 +20,8 @@ pub mod mi;
 pub mod multilayer;
 pub mod network;
 pub mod output;
+/// Sequential Rayon shim, compiled only when the `parallel` feature is off.
+mod par;
 pub mod pipeline;
 pub mod recon;
 pub mod scalefree;

@@ -24,7 +24,10 @@
 //! co-inertia measure; the paper's ade4 co-inertia may differ in
 //! centering/weighting, so treat these scores as faithful-in-spirit.
 
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
+#[cfg(not(feature = "parallel"))]
+use crate::par::prelude::*;
 
 use crate::metrics::Graph;
 
