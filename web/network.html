@@ -997,6 +997,9 @@ function load(g){
     (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
   updateFocusChip(); showInfo();
   restoring=false;   // from here on, user interactions persist
+  // the scale-free canvas is drawn during load before the sidebar has laid out
+  // (0-width) — redraw once the layout has settled so the plot actually appears.
+  requestAnimationFrame(()=>{ try{ scaleFree(); }catch(e){} });
 }
 
 function buildColors(){
@@ -1681,8 +1684,9 @@ function scaleFree(){
   recommend();
 }
 function drawSF(fit){
-  SFX.setTransform(dpr,0,0,dpr,0,0);
-  const W=SF.clientWidth,H=SF.clientHeight,pad=24; SFX.clearRect(0,0,W,H);
+  const W=SF.clientWidth||300, H=SF.clientHeight||150, pad=24;
+  SF.width=W*dpr; SF.height=H*dpr;          // size the backing store to the visible box
+  SFX.setTransform(dpr,0,0,dpr,0,0); SFX.clearRect(0,0,W,H);
   SFX.strokeStyle=COL.line; SFX.lineWidth=1;
   SFX.strokeRect(pad,6,W-pad-6,H-pad-6);
   SFX.fillStyle=COL.muted; SFX.font="10px -apple-system,sans-serif";
@@ -2081,7 +2085,13 @@ function applyCollapse(){ let m; try{ m=JSON.parse(localStorage.getItem("xsnet:c
   if(!m||typeof m!=="object") return;
   document.querySelectorAll(".sec.cl[data-sec]").forEach(s=>{ if(s.dataset.sec in m) s.classList.toggle("collapsed", !!m[s.dataset.sec]); }); }
 $("aside").addEventListener("click", e=>{ const h2=e.target.closest("h2");
-  if(h2 && h2.parentElement.classList.contains("cl")){ h2.parentElement.classList.toggle("collapsed"); saveCollapse(); } });
+  if(h2 && h2.parentElement.classList.contains("cl")){ const sec=h2.parentElement;
+    sec.classList.toggle("collapsed"); saveCollapse();
+    // a canvas drawn while its section was collapsed is 0-sized/blank — redraw the
+    // scale-free plot now that it is visible (and sized).
+    if(!sec.classList.contains("collapsed") && sec.dataset.sec==="scalefree" && G){
+      SF.width=(SF.clientWidth||300)*dpr; SF.height=(SF.clientHeight||150)*dpr; scaleFree(); }
+  } });
 applyCollapse();
 $("#layerseg").onclick=e=>{ const b=e.target.closest("button[data-r]"); if(!b||b.dataset.r===layerRank) return;
   layerRank=b.dataset.r; $("#layerseg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.r===layerRank));
