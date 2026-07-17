@@ -7,9 +7,8 @@ group + category hierarchy from amazon-meta.txt, and writes web/amazon.graph.jso
   nodes: id, title, group (Book/Music/DVD/Video/…), cat1..cat3 (category levels),
          salesrank; color_map/themes over `group`; meta.ranks declares the
          group→cat1→cat2→cat3 hierarchy so the FunNet layer ladder works here too.
-  edges: co-purchase links (both endpoints sampled), ecorr = category-overlap
-         (Jaccard of the two products' category tokens) so stronger co-purchase +
-         topical similarity reads as a thicker/positive edge.
+  edges: co-purchase links; weight = category overlap (Jaccard of the two
+         products' category tokens), so topical similarity reads as a thicker edge.
 
 The source data is large & local (gitignored); the output graph.json too.
 """
@@ -103,7 +102,7 @@ def main():
         if a in keepset and b in keepset:
             ca, cb = catset(a), catset(b)
             jac = len(ca & cb) / len(ca | cb) if (ca or cb) else 0.0
-            ej.append({"source": f"p{a}", "target": f"p{b}", "ecorr": round(0.15 + 0.85 * jac, 4)})
+            ej.append({"source": f"p{a}", "target": f"p{b}", "weight": round(jac, 4)})
     print(f"kept {len(nodes)} annotated nodes, {len(ej)} edges", file=sys.stderr)
 
     groups = sorted({n["group"] for n in nodes})

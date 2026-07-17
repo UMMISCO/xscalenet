@@ -308,7 +308,7 @@
 
     <div class="sec cl" data-sec="filters" style="order:4">
       <h2>Edge filters</h2>
-      <label class="row"><span class="lh">min |ecorr| <b id="ecv"></b></span>
+      <label class="row"><span class="lh"><span id="eclabel">min |ecorr|</span> <b id="ecv"></b></span>
         <input type="range" id="ec" min="0" max="1" step="0.001"></label>
       <div class="seg" id="sign" style="margin:8px 0">
         <button data-v="all" class="on">both ±</button>
@@ -392,6 +392,32 @@ function toggleCoverage(){
 }
 let down=null;            // pointer-down bookkeeping (to tell a click from a drag)
 let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null, ecMax=1;
+// Edge metric: ecorr is reconstruction-specific (signed Spearman). A loaded graph
+// has none, so we derive a generic per-edge strength — a provided `weight`, else
+// the topological neighbourhood overlap (Jaccard) computed in-browser. `e.w` is
+// the working value; edgeSigned/edgeLabel/edgeSource describe it.
+let edgeSigned=true, edgeLabel="ecorr", edgeSource="reconstruction";
+function computeEdgeMetric(){
+  const hasEcorr = edges.some(e=>isFinite(e.ecorr));
+  const hasWeight = !hasEcorr && edges.some(e=>isFinite(e.weight));
+  if(hasEcorr){ edgeSigned=true; edgeLabel="ecorr";
+    edgeSource = (G.meta&&G.meta.k!=null) ? "SCS reconstruction" : "data";
+    edges.forEach(e=>e.w=+e.ecorr);
+  } else if(hasWeight){ edgeSigned=false; edgeLabel="weight"; edgeSource="data";
+    edges.forEach(e=>e.w=isFinite(e.weight)?+e.weight:0);
+  } else {                                   // topological neighbourhood overlap
+    edgeSigned=false; edgeLabel="overlap"; edgeSource="computed · neighbourhood Jaccard";
+    const adj=new Map();
+    const add=(u,v)=>{ let s=adj.get(u); if(!s){s=new Set();adj.set(u,s);} s.add(v); };
+    for(const e of edges){ add(e.a,e.b); add(e.b,e.a); }
+    for(const e of edges){ const A=adj.get(e.a), B=adj.get(e.b);
+      const small=A.size<=B.size?A:B, big=A.size<=B.size?B:A; let inter=0;
+      for(const x of small){ if(x!==e.a && x!==e.b && big.has(x)) inter++; }
+      const uni=(A.size-1)+(B.size-1)-inter; e.w = uni>0 ? inter/uni : 0; }
+  }
+  ecMax = Math.max(1e-9, ...edges.map(e=>Math.abs(e.w||0)));
+}
+function edgeColor(e){ return edgeSigned ? (e.w<0?COL.neg:COL.pos) : COL.pos; }
 let sizeBy="degree", sizeMax={};
 // ATC propagation trace (present when the graph was enriched with graph_atc)
 let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
@@ -583,7 +609,7 @@ function funnetLayer(g, rank){
       keep.set(key, tp.proximity[a][b]); }
   }
   const edges=[...keep.entries()].map(([key,w])=>{ const [a,b]=key.split("_").map(Number);
-    return { source:themes[a], target:themes[b], ecorr:w, weight:w, score:1 }; });
+    return { source:themes[a], target:themes[b], weight:w, score:1 }; });
   return { meta:{ title:`${g.meta?.title||"network"} — ${rank} functional layer (FunNet)`,
       source:`${m} ${rank}-level taxa${dropped?` (top by size; ${dropped} rare/singleton dropped)`:""} · propagation-proximity (${tp.iterations} steps) · MDS layout · edge = Gaussian affinity`,
       directed:false, color_by:GROUP_FIELD, ranks:HIER, trait_ref },
@@ -883,6 +909,7 @@ function load(g){
     x:hasFixedLayout?+n.x:0, y:hasFixedLayout?-n.y:0, vx:0,vy:0}));
   idx={}; nodes.forEach((n,i)=>idx[n.id]=i);
   edges=(g.edges||[]).map(e=>({...e,a:idx[e.source],b:idx[e.target]})).filter(e=>e.a!=null&&e.b!=null);
+  computeEdgeMetric();   // derive e.w (ecorr / weight / computed overlap) + ecMax
   // colour options: declared color_by + any string/categorical node field
   const fields=new Set();
   // gtdb (constant version tag) and gtdb_classification (unique per node) are
@@ -898,11 +925,14 @@ function load(g){
   setupProp();
 
   // ecorr slider range from data
-  const absE=edges.map(e=>Math.abs(e.ecorr)).filter(v=>isFinite(v));
+  // edge-strength filter over the active metric (e.w: ecorr / weight / overlap)
+  const absE=edges.map(e=>Math.abs(e.w)).filter(v=>isFinite(v));
   const lo=absE.length?Math.min(...absE):0, hi=absE.length?Math.max(...absE):1;
-  ecMax=hi||1;   // edge thickness ∝ |ecorr|, normalized to the strongest edge
   const ec=$("#ec"); ec.min=(Math.floor(lo*100)/100).toFixed(2); ec.max=(Math.ceil(hi*100)/100).toFixed(2);
   ec.step=0.005; ec.value=ec.min; filt.ec=+ec.min;
+  $("#eclabel").textContent = "min "+(edgeSigned?"|"+edgeLabel+"|":edgeLabel);
+  // sign filter only makes sense for a signed metric (ecorr)
+  $("#sign").style.display = edgeSigned ? "" : "none";
   const sc=$("#sc"); const scs=edges.map(e=>e.score).filter(v=>isFinite(v));
   if(scs.length){ sc.min=0; sc.max=(Math.ceil(Math.max(...scs)*100)/100).toFixed(2); sc.step=0.005; }
   $("#tn").max=edges.length; $("#tn").value=edges.length; filt.topN=1;
@@ -1006,12 +1036,12 @@ function drawLegend(){
 
 // ---------- filtering ----------
 function passEdge(e){
-  const ae=Math.abs(e.ecorr);
-  if(isFinite(ae)){                                   // weighted edge — filter by |ecorr| / sign
+  const ae=Math.abs(e.w);
+  if(isFinite(ae)){                                   // filter by strength / (signed) direction
     if(ae<filt.ec) return false;
-    if(filt.sign==="pos"&&e.ecorr<0) return false;
-    if(filt.sign==="neg"&&e.ecorr>=0) return false;
-  } else if(filt.ec>0 || filt.sign!=="all"){          // unweighted edge, but a sign/ecorr filter is on
+    if(edgeSigned && filt.sign==="pos" && e.w<0) return false;
+    if(edgeSigned && filt.sign==="neg" && e.w>=0) return false;
+  } else if(filt.ec>0){
     return false;
   }
   if(isFinite(e.score)&&e.score<filt.sc) return false;
@@ -1022,7 +1052,7 @@ function computeVisible(){
   let es=edges.filter(passEdge);
   // top-N by |ecorr|
   const N=Math.round(filt.topN*edges.length);
-  if(es.length>N){ es=es.slice().sort((a,b)=>Math.abs(b.ecorr)-Math.abs(a.ecorr)).slice(0,N); }
+  if(es.length>N){ es=es.slice().sort((a,b)=>Math.abs(b.w)-Math.abs(a.w)).slice(0,N); }
   // node group filter
   const deg={}; nodes.forEach(n=>deg[n.i]=0);
   const kept=[];
@@ -1083,6 +1113,8 @@ function drawStats(){
   let h=gh("Topology")+
     row("nodes", `${VIS.visN.size} ${U('/ '+nodes.length)}`)+
     row("edges", `${VIS.edges.length} ${U('/ '+edges.length)}`, onLayer?pill("FunNet"):(spectral?pill("SCS"):""))+
+    row("edge metric", edgeLabel,
+      edgeSource.startsWith("computed")?pill("computed","calc"):(edgeSource.includes("SCS")?pill("SCS"):pill("data")))+
     row("components", `${s.comps} ${U('(max '+s.largest+')')}`, pill("computed","calc"))+
     row("mean degree", s.meanDeg.toFixed(1), pill("computed","calc"))+
     row("density", s.density.toFixed(3), pill("computed","calc"))+
@@ -1389,7 +1421,7 @@ function detectModules(){
   if(pool.length<2){ $("#modq").textContent="(too few nodes)"; return; }
   const inPool=new Set(pool), loc=new Map(); pool.forEach((gi,i)=>loc.set(gi,i));
   const n=pool.length, adj=Array.from({length:n},()=>[]), k=new Float64Array(n); let m2=0;
-  const ew=e=> weighted ? (Math.abs(e.ecorr)||1) : 1;
+  const ew=e=> weighted ? (Math.abs(e.w)||1) : 1;
   const es=(onFiltered?VIS.edges:edges).filter(e=>inPool.has(e.a)&&inPool.has(e.b));
   for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b),w=ew(e);
     adj[a].push([b,w]); adj[b].push([a,w]); k[a]+=w; k[b]+=w; m2+=2*w; }
@@ -1544,7 +1576,7 @@ function render(){
     const a=nodes[e.a],b=nodes[e.b];
     const onPath = pathOn && pathEdgeSet.has(e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a);
     if(onPath || e===hotEdge){
-      CTX.globalAlpha=1; CTX.strokeStyle=e===hotEdge?(e.ecorr<0?COL.neg:COL.accent):COL.accent;
+      CTX.globalAlpha=1; CTX.strokeStyle=e===hotEdge?(edgeSigned&&e.w<0?COL.neg:COL.accent):COL.accent;
       CTX.lineWidth=(e===hotEdge?3:3.2)/view.k;
       CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue;
     }
@@ -1554,10 +1586,10 @@ function render(){
       CTX.globalAlpha=on?(0.25+0.6*t):0.04; CTX.strokeStyle=heat(t); CTX.lineWidth=(0.4+2.6*t)/view.k;
       CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue; }
     CTX.globalAlpha = on?(nbr?0.9:0.5):0.05;
-    CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
+    CTX.strokeStyle = edgeColor(e);
     // width ∝ |ecorr| (correlation / functional-affinity strength), normalized to
     // the strongest edge; falls back to a thin line when ecorr is missing.
-    const ae=Math.abs(e.ecorr);
+    const ae=Math.abs(e.w);
     CTX.lineWidth = (isFinite(ae) ? 0.3+3.2*Math.sqrt(Math.min(1, ae/ecMax)) : 0.7)/view.k;
     CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke();
   }
@@ -1661,14 +1693,14 @@ function drawSF(fit){
 }
 
 function recommend(){
-  const absE=edges.map(e=>Math.abs(e.ecorr)).filter(isFinite);
+  const absE=edges.map(e=>Math.abs(e.w)).filter(isFinite);
   const lo=Math.min(...absE), hi=Math.max(...absE), steps=24;
   let best=null;
   for(let s=0;s<=steps;s++){
     const t=lo+(hi-lo)*s/steps;
     const deg={}; nodes.forEach(n=>deg[n.i]=0); const vis=new Set();
-    for(const e of edges){ if(!isFinite(e.ecorr)||Math.abs(e.ecorr)<t) continue;
-      if(filt.sign==="pos"&&e.ecorr<0)continue; if(filt.sign==="neg"&&e.ecorr>=0)continue;
+    for(const e of edges){ if(!isFinite(e.w)||Math.abs(e.w)<t) continue;
+      if(edgeSigned&&filt.sign==="pos"&&e.w<0)continue; if(edgeSigned&&filt.sign==="neg"&&e.w>=0)continue;
       deg[e.a]++;deg[e.b]++; }
     nodes.forEach(n=>{ if(deg[n.i]>0) vis.add(n.i); });
     const fit=scaleFreeFit(deg,[...vis]); if(!fit) continue;
@@ -1682,7 +1714,7 @@ function recommend(){
   const r=$("#rec");
   if(!best){ r.textContent=""; $("#applyrec").style.display="none"; return; }
   $("#applyrec").style.display="";
-  r.innerHTML=`Recommended min |ecorr| ≈ <b>${best.t.toFixed(3)}</b> `+
+  r.innerHTML=`Recommended min ${edgeSigned?"|"+edgeLabel+"|":edgeLabel} ≈ <b>${best.t.toFixed(3)}</b> `+
     `(γ=${best.gamma.toFixed(2)}, R²=${best.r2.toFixed(3)}, keeps ${Math.round(best.frac*100)}% of nodes). `+
     `<span class="hint">Maximises power-law fit of the degree distribution (Barabási / WGCNA scale-free criterion).</span>`;
 }
@@ -1723,7 +1755,7 @@ CV.addEventListener("pointermove",ev=>{
     if(!selected.size) inspect(h,false);
   } else if(he){ place(); const dir=he.orient===1?'→':he.orient===-1?'←':'—';
     tip.innerHTML=`<div class="t">${nodes[he.a].id} ${dir} ${nodes[he.b].id}</div>`+
-      row("ecorr", `<span style="color:${he.ecorr<0?COL.neg:COL.pos}">${he.ecorr>=0?'+':''}${(+he.ecorr).toFixed(3)}</span>`)+
+      row(edgeLabel, `<span style="color:${edgeSigned&&he.w<0?COL.neg:COL.pos}">${edgeSigned&&he.w>=0?'+':''}${(+he.w).toFixed(3)}</span>`)+
       (he.score!=null?row("presence score",(+he.score).toFixed(3)):"")+
       (he.orient_score!=null?row("orient score",(+he.orient_score).toFixed(3)):"")+
       (he.weight!=null?row("species-edges",he.weight):"");
@@ -1808,7 +1840,7 @@ Heap.prototype.size=function(){ return this.a.length; };
 // strong correlations), else unit cost (fewest hops).
 function dijkstra(s,t,weighted){
   const adj={};
-  for(const e of VIS.edges){ const w=weighted? 1/Math.max(1e-6,Math.abs(e.ecorr)) : 1;
+  for(const e of VIS.edges){ const w=weighted? 1/Math.max(1e-6,Math.abs(e.w)) : 1;
     (adj[e.a]=adj[e.a]||[]).push([e.b,w]); (adj[e.b]=adj[e.b]||[]).push([e.a,w]); }
   const dist={}, prev={}, done=new Set(), h=new Heap(); dist[s]=0; h.push(s,0);
   while(h.size()){ const [d,u]=h.pop(); if(done.has(u))continue; done.add(u); if(u===t)break;
@@ -1825,7 +1857,7 @@ function computePath(){
   const path=dijkstra(s,t, pathMode==="strength");
   if(!path) return;
   pathNodes=path;
-  const ec={}; for(const e of VIS.edges) ec[e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a]=e.ecorr;
+  const ec={}; for(const e of VIS.edges) ec[e.a<e.b?e.a+"|"+e.b:e.b+"|"+e.a]=e.w;
   for(let i=0;i+1<path.length;i++){ const a=path[i],b=path[i+1], key=a<b?a+"|"+b:b+"|"+a;
     pathEdgeSet.add(key); pathEcorrs.push(ec[key]); }
 }
@@ -1855,11 +1887,11 @@ function inspectMulti(){
       const mean=absE.length?absE.reduce((a,b)=>a+b,0)/absE.length:0;
       const minE=absE.length?Math.min(...absE):0;
       path=toggle+
-        `<div class="kv"><span class="k">path</span><b>${pathNodes.length-1} hops · x̄|ecorr| ${mean.toFixed(2)} · min ${minE.toFixed(2)}</b></div>`+
+        `<div class="kv"><span class="k">path</span><b>${pathNodes.length-1} hops · x̄ ${edgeLabel} ${mean.toFixed(2)} · min ${minE.toFixed(2)}</b></div>`+
         `<div class="nbrs" style="margin-top:4px">`+pathNodes.map((i,k)=>
           `<div class="nbr" onclick="selectNode(${i},false)"><span class="dot" style="background:${colorOf(nodes[i])}"></span>`+
           `<span class="nm">${nodes[i].id} <i>${nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||'')}</i></span>`+
-          `${k<pathEcorrs.length?`<b style="color:${pathEcorrs[k]<0?COL.neg:COL.pos}">${pathEcorrs[k]>=0?'+':''}${(+pathEcorrs[k]).toFixed(2)}</b>`:''}</div>`).join("")+`</div>`;
+          `${k<pathEcorrs.length?`<b style="color:${edgeSigned&&pathEcorrs[k]<0?COL.neg:COL.pos}">${edgeSigned&&pathEcorrs[k]>=0?'+':''}${(+pathEcorrs[k]).toFixed(2)}</b>`:''}</div>`).join("")+`</div>`;
     } else path=toggle+`<div class="hint" style="margin-top:6px">No path between them in the current (filtered) view.</div>`;
   }
   $("#inspect").innerHTML=`<h2>${selected.size} nodes selected</h2>`+
@@ -1879,16 +1911,17 @@ function nodeActions(i){
 }
 function neighborList(i){
   const nb=[]; for(const e of edges){ let j=null; if(e.a===i)j=e.b; else if(e.b===i)j=e.a;
-    if(j!=null) nb.push({j, ec:+e.ecorr}); }
+    if(j!=null) nb.push({j, ec:+e.w}); }
   if(!nb.length) return '<div class="hint" style="margin-top:10px">No partners — isolated node.</div>';
-  nb.sort((a,b)=>b.ec-a.ec);
+  nb.sort((a,b)=>Math.abs(b.ec)-Math.abs(a.ec));   // strongest link first
   const pos=nb.filter(x=>x.ec>=0).length, neg=nb.length-pos, cap=40;
-  const rows=nb.slice(0,cap).map(x=>{ const m=nodes[x.j], sub=(m.genus&&m.genus!=='NA')?m.genus:(m.phylum||'');
+  const rows=nb.slice(0,cap).map(x=>{ const m=nodes[x.j];
+    const sub=(m.genus&&m.genus!=='NA')?m.genus:(m.phylum||m[GROUP_FIELD]||'');
     return `<div class="nbr" onclick="selectNode(${x.j},false)" title="${(m.label||m.id).replace(/"/g,'')}">`+
       `<span class="dot" style="background:${colorOf(m)}"></span>`+
       `<span class="nm">${m.id} <i>${sub}</i></span>`+
-      `<b style="color:${x.ec<0?COL.neg:COL.pos}">${x.ec>=0?'+':''}${x.ec.toFixed(2)}</b></div>`; }).join("");
-  return `<div class="nbrhead"><span>partners · ecorr</span><span>${nb.length} · ${pos}+ / ${neg}−</span></div>`+
+      `<b style="color:${edgeSigned&&x.ec<0?COL.neg:COL.pos}">${edgeSigned&&x.ec>=0?'+':''}${x.ec.toFixed(2)}</b></div>`; }).join("");
+  return `<div class="nbrhead"><span>partners · ${edgeLabel}</span><span>${edgeSigned?`${nb.length} · ${pos}+ / ${neg}−`:nb.length}</span></div>`+
     `<div class="nbrs">${rows}</div>`+(nb.length>cap?`<div class="hint">+${nb.length-cap} more</div>`:"");
 }
 // actions
@@ -1932,8 +1965,8 @@ function exportNodesCSV(){
   download(rows.join("\n"), "nodes.csv", "text/csv"); flash(`Exported ${nodes.length} nodes`);
 }
 function exportEdgesCSV(){
-  const rows=["source,target,ecorr,score,orient"];
-  for(const e of VIS.edges) rows.push([csvCell(nodes[e.a].id),csvCell(nodes[e.b].id),csvCell(e.ecorr),csvCell(e.score),csvCell(e.orient)].join(","));
+  const rows=["source,target,"+edgeLabel+",score,orient"];
+  for(const e of VIS.edges) rows.push([csvCell(nodes[e.a].id),csvCell(nodes[e.b].id),csvCell(e.w),csvCell(e.score),csvCell(e.orient)].join(","));
   download(rows.join("\n"), "edges_filtered.csv", "text/csv"); flash(`Exported ${VIS.edges.length} edges (filtered)`);
 }
 function exportGraphJSON(){

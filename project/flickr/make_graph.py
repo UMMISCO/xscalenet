@@ -8,7 +8,8 @@ annotation. So the same analysis (ATC propagation, FunNet tag-proximity layer,
 guilds, provenance) runs on a social/image graph — a very different domain.
 
   nodes: id, tag; color_map/color_by over `tag`; meta.ranks = ["photo","tag"].
-  edges: co-context links (both endpoints tagged), ecorr = 1 (unweighted).
+  edges: co-context links (unweighted); the app computes a topological
+         neighbourhood-overlap strength per edge.
 
 Source data is large & local (gitignored); output web/flickr.graph.json too.
 """
@@ -97,7 +98,7 @@ def main():
     for u in keep:
         for v in adj[u]:
             if v in keep and u < v:
-                edges.append({"source": f"ph{u}", "target": f"ph{v}", "ecorr": 1.0})
+                edges.append({"source": f"ph{u}", "target": f"ph{v}"})
     print(f"subgraph: {len(nodes)} photos, {len(edges)} edges", file=sys.stderr)
 
     tags = sorted({n["tag"] for n in nodes})
