@@ -69,6 +69,21 @@
   .sec.cl.collapsed > *:not(h2){display:none !important}
   .kv{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
   .kv .k{color:var(--muted)} .kv b{font-variant-numeric:tabular-nums;font-weight:600}
+  /* grouped info card (Network panel): blue group headers, key/value rows, provenance pills */
+  .gh{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);margin:13px 0 5px}
+  .gh:first-child{margin-top:0}
+  .prow{display:grid;grid-template-columns:90px 1fr;gap:8px;padding:2.5px 0;align-items:baseline}
+  .prow .pk{color:var(--muted);font-size:12px}
+  .prow .pv{font-size:12.5px;font-variant-numeric:tabular-nums}
+  .prow .pv .u{color:var(--muted);font-variant-numeric:normal}
+  .pill{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+    padding:1px 5px;border-radius:5px;vertical-align:middle;margin-left:3px;white-space:nowrap}
+  .pill.src{color:#2f9e44;background:rgba(63,185,80,.16)}
+  .pill.calc{color:var(--accent);background:rgba(80,132,246,.16)}
+  .pill.warn{color:#c2911c;background:rgba(210,153,34,.18)}
+  @media (prefers-color-scheme:dark){ .pill.src{color:#57d977} .pill.warn{color:#e3b341} }
+  :root[data-theme=dark] .pill.src{color:#57d977} :root[data-theme=dark] .pill.warn{color:#e3b341}
+  .srcnote{margin-top:13px;padding-top:10px;border-top:1px solid var(--line2);font-size:11px;color:var(--muted);line-height:1.5}
   label.row{display:flex;flex-direction:column;gap:5px;margin:10px 0}
   label.row .lh{display:flex;justify-content:space-between;font-size:12px}
   label.row .lh b{font-variant-numeric:tabular-nums}
@@ -82,7 +97,7 @@
     padding:6px 4px;cursor:pointer;font:inherit;font-size:12px}
   .seg button:last-child{border-right:0}
   .seg button.on{background:var(--accent);color:#fff}
-  .legend{display:flex;flex-direction:column;gap:3px;margin-top:2px}
+  .legend{display:flex;flex-direction:column;gap:3px;margin-top:2px;max-height:240px;overflow-y:auto}
   .legend .li{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;padding:1px 0;border-radius:4px}
   .legend .li:hover{background:var(--line2)}
   .legend .li.off{opacity:.35}
@@ -201,7 +216,7 @@
     <div id="tip"></div>
   </div>
   <aside>
-    <div class="sec" style="order:1">
+    <div class="sec cl" data-sec="net" style="order:1">
       <h2>Network</h2>
       <div id="stats"></div>
     </div>
@@ -211,7 +226,7 @@
       <div class="hint">Click a node to select it.</div>
     </div>
 
-    <div class="sec cl" style="order:3">
+    <div class="sec cl" data-sec="colour" style="order:3">
       <h2>Colour by</h2>
       <select id="colorby"></select>
       <div class="legend" id="legend" style="margin-top:9px"></div>
@@ -223,7 +238,7 @@
         <input type="checkbox" id="autoflow"> auto-flow layout on filter</label>
     </div>
 
-    <div class="sec cl collapsed" style="order:7">
+    <div class="sec cl collapsed" data-sec="modules" style="order:7">
       <h2><span id="modtitle">Modularity</span> <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
@@ -236,7 +251,7 @@
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec cl collapsed" id="subgsec" style="display:none;order:8">
+    <div class="sec cl collapsed" id="subgsec" data-sec="subgraphs" style="display:none;order:8">
       <h2>Spectral subgraphs <span class="hint" id="subgnote"></span></h2>
       <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”.</div>
       <button class="btn" id="subgcov" style="width:100%;margin-top:9px;justify-content:center">Overlap heatmap (coverage)</button>
@@ -251,13 +266,13 @@
       <div class="rec" id="subginfo" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec cl" id="layersec" style="display:none;order:5">
+    <div class="sec cl" id="layersec" data-sec="layer" style="display:none;order:5">
       <h2>Taxonomic layer</h2>
       <div class="seg" id="layerseg" style="flex-wrap:wrap"></div>
       <div class="hint" id="layernote" style="margin-top:7px">FunNet functional layer: taxon membership is propagated over the species network; taxa are linked by self-tuning Gaussian proximity of their propagated profiles and laid out by classic MDS (proximity ≈ functional, not just direct contacts).</div>
     </div>
 
-    <div class="sec cl" id="propsec" style="display:none;order:6">
+    <div class="sec cl" id="propsec" data-sec="atc" style="display:none;order:6">
       <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -277,7 +292,7 @@
       <div class="rec" id="propinfo" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec cl" style="order:4">
+    <div class="sec cl" data-sec="filters" style="order:4">
       <h2>Edge filters</h2>
       <label class="row"><span class="lh">min |ecorr| <b id="ecv"></b></span>
         <input type="range" id="ec" min="0" max="1" step="0.001"></label>
@@ -294,7 +309,7 @@
         <input type="range" id="md" min="0" max="10" step="1" value="0"></label>
     </div>
 
-    <div class="sec cl collapsed" style="order:9">
+    <div class="sec cl collapsed" data-sec="scalefree" style="order:9">
       <h2>Scale-free topology <span class="hint" id="sfnote"></span></h2>
       <canvas id="sf"></canvas>
       <div class="verdict" id="verdict"></div>
@@ -995,17 +1010,49 @@ function graphStats(){
   }
   return {comps, largest, meanDeg, density, trans};
 }
+const TAX_FIELDS=["superkingdom","phylum","class","order","family","genus","species","phylum_group"];
+const TRAIT_FIELDS=["butyrate","inflammation","transit","oralisation","oral_gut_use","oral_gut_remove"];
+// Network info as a grouped card with provenance pills: which authority each fact
+// comes from (SCS = spectral-consensus reconstruction, GTDB taxonomy, MSP biobank
+// traits, ENGINE = validated ATC) vs COMPUTED live on the visible subgraph.
 function drawStats(){
-  const g=G.meta||{}, s=graphStats();
-  $("#stats").innerHTML=
-    kv("nodes shown", `${VIS.visN.size} <span class="k">/ ${nodes.length}</span>`)+
-    kv("edges shown", `${VIS.edges.length} <span class="k">/ ${edges.length}</span>`)+
-    kv("components", `${s.comps} <span class="k">(max ${s.largest})</span>`)+
-    kv("mean degree", s.meanDeg.toFixed(1))+
-    kv("density", s.density.toFixed(3))+
-    (s.trans!=null?kv("clustering", s.trans.toFixed(3)):"")+
-    (g.directed!=null?kv("directed", g.directed?"yes":"no"):"")+
-    kv("colour groups", groups.length);
+  const m=G.meta||{}, s=graphStats();
+  const onLayer=layerRank && layerRank!=="species", spectral=m.k!=null && !onLayer;
+  const hasAtc=nodes.some(n=>n.atc!=null);
+  const pill=(t,c)=>`<span class="pill ${c||'src'}">${t}</span>`;
+  const gh=t=>`<div class="gh">${t}</div>`;
+  const U=t=>`<span class="u">${t}</span>`;
+  const row=(k,v,p)=>`<div class="prow"><span class="pk">${k}</span><span class="pv">${v}${p||""}</span></div>`;
+  let h=gh("Topology")+
+    row("nodes", `${VIS.visN.size} ${U('/ '+nodes.length)}`)+
+    row("edges", `${VIS.edges.length} ${U('/ '+edges.length)}`, onLayer?pill("FunNet"):(spectral?pill("SCS"):""))+
+    row("components", `${s.comps} ${U('(max '+s.largest+')')}`, pill("computed","calc"))+
+    row("mean degree", s.meanDeg.toFixed(1), pill("computed","calc"))+
+    row("density", s.density.toFixed(3), pill("computed","calc"))+
+    (s.trans!=null?row("clustering", s.trans.toFixed(3), pill("computed","calc")):"")+
+    (m.directed!=null?row("directed", m.directed?"yes":"no"):"");
+  if(spectral){ const nsg=(G.subgraphs||[]).length; h+=gh("Spectral reconstruction")+
+    row("eigenvectors", m.k, pill("SCS"))+
+    (nsg?row("subgraphs", nsg, pill("SCS")):"")+
+    (m.subset_m!=null?row("vars / subgraph", m.subset_m, pill("SCS")):""); }
+  if(onLayer){ h+=gh("Functional layer")+
+    row("rank", layerRank+"-level", pill("FunNet"))+
+    row("edge", "Gaussian affinity", pill("FunNet"))+
+    row("layout", "classic MDS", pill("computed","calc")); }
+  h+=gh("Annotation")+
+    row("colour by", colorField||"—", TAX_FIELDS.includes(colorField)?pill("GTDB"):(TRAIT_FIELDS.includes(colorField)?pill("MSP"):""))+
+    row("colour groups", groups.length)+
+    (hasAtc?row("ATC", G.atc_trace?.annotation||"annotation", atcRecomputed?pill("recomputed","calc"):pill("engine")):"");
+  if(!onLayer){ const names={igraph:"igraph",force:"force-directed",circle:"circular",concentric:"concentric",grid:"grid"};
+    h+=gh("View")+row("layout", names[currentLayout]||currentLayout,
+      currentLayout==="igraph"?pill("igraph"):pill("computed","calc")); }
+  const srcs=[];
+  if(spectral||/reconstruction/i.test(m.source||"")) srcs.push("xscalenet spectral-consensus reconstruction");
+  if(nodes.some(n=>TAX_FIELDS.some(t=>n[t]))) srcs.push("GTDB 220 taxonomy");
+  if(nodes.some(n=>TRAIT_FIELDS.some(t=>n[t]!=null))) srcs.push("MSP biobank traits");
+  if(hasAtc) srcs.push("ATC — Prifti et al. 2010");
+  if(srcs.length) h+=`<div class="srcnote"><b>Sources:</b> ${srcs.join(" · ")}.</div>`;
+  $("#stats").innerHTML=h;
 }
 function kv(k,v){return `<div class="kv"><span class="k">${k}</span><b>${v}</b></div>`;}
 
@@ -1849,9 +1896,16 @@ $("#sign").querySelectorAll("button").forEach(b=>b.onclick=()=>{
 });
 $("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); };
 $("#sizeby").onchange=e=>{ sizeBy=e.target.value; render(); };
-// collapsible sidebar sections — click a header to fold/unfold
+// collapsible sidebar sections — click a header to fold/unfold; state is a global
+// UI preference, persisted in localStorage across graphs.
+function saveCollapse(){ try{ const c=[...document.querySelectorAll(".sec.cl.collapsed[data-sec]")].map(s=>s.dataset.sec);
+  localStorage.setItem("xsnet:collapsed", JSON.stringify(c)); }catch(e){} }
+function applyCollapse(){ let saved; try{ saved=JSON.parse(localStorage.getItem("xsnet:collapsed")||"null"); }catch(e){}
+  if(!saved) return; const set=new Set(saved);
+  document.querySelectorAll(".sec.cl[data-sec]").forEach(s=>s.classList.toggle("collapsed", set.has(s.dataset.sec))); }
 $("aside").addEventListener("click", e=>{ const h2=e.target.closest("h2");
-  if(h2 && h2.parentElement.classList.contains("cl")) h2.parentElement.classList.toggle("collapsed"); });
+  if(h2 && h2.parentElement.classList.contains("cl")){ h2.parentElement.classList.toggle("collapsed"); saveCollapse(); } });
+applyCollapse();
 $("#layerseg").onclick=e=>{ const b=e.target.closest("button[data-r]"); if(!b||b.dataset.r===layerRank) return;
   layerRank=b.dataset.r; $("#layerseg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.r===layerRank));
   applyLayer(); };
