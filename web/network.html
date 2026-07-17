@@ -255,7 +255,7 @@
     <div class="sec cl collapsed" data-sec="modules" style="order:7">
       <h2><span id="modtitle">Modularity</span> <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
-        <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
+        <input type="checkbox" id="modweight" checked> weight by edge strength</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
         <input type="checkbox" id="modfiltered"> on the filtered view only</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
@@ -291,7 +291,7 @@
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <button class="btn primary" id="atcrecompute" style="flex:1;justify-content:center" title="Recompute ATC on the currently visible network — after filtering / excluding contaminants (e.g. colour by species and toggle off Homo sapiens)">↻ Recompute on current view</button>
-        <label class="lh" style="display:flex;align-items:center;gap:5px;white-space:nowrap" title="Weight propagation by |ecorr| instead of 1/0"><input type="checkbox" id="atcweight"> weighted</label>
+        <label class="lh" style="display:flex;align-items:center;gap:5px;white-space:nowrap" title="Weight propagation by edge strength instead of 1/0"><input type="checkbox" id="atcweight"> weighted</label>
       </div>
       <div class="hint" id="atcrecinfo" style="margin:-2px 0 8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px">
@@ -895,12 +895,13 @@ function load(g){
   atcRecomputed=false;
   selected=new Set(); focus=null;   // node indices are graph-specific — reset on (re)load
   $("#modq").textContent=""; $("#modlist").innerHTML=""; $("#modhint").style.display="";
-  // on a functional layer, Louvain reveals functional *guilds* of taxa — say so.
-  const onLayer = layerRank && layerRank!==BASE_RANK;
-  $("#modtitle").textContent = onLayer ? "Functional guilds" : "Modularity";
-  $("#moddetect").textContent = onLayer ? "Detect guilds (Louvain)" : "Detect modules (Louvain)";
-  $("#modhint").textContent = onLayer
-    ? "Cluster the proximity network into functional guilds of taxa (Louvain), then colour by guild and check whether guilds are taxonomically coherent."
+  // "Functional guilds" only when there are functional traits to characterize them
+  // (a FunNet layer that carries trait_ref). Otherwise these are just modules.
+  const guilds = !!(g.meta && g.meta.trait_ref);
+  $("#modtitle").textContent = guilds ? "Functional guilds" : "Modularity";
+  $("#moddetect").textContent = guilds ? "Detect guilds (Louvain)" : "Detect modules (Louvain)";
+  $("#modhint").textContent = guilds
+    ? "Cluster the proximity network into functional guilds (Louvain), colour by guild, and read each guild's over-represented trait + taxonomic coherence."
     : "Partition the network into communities that maximise modularity, then colour by module.";
   // Fixed layout: use igraph coordinates from the graph when present (y flipped
   // to match the R/igraph plot, whose y points up). Otherwise force-layout.
@@ -1437,7 +1438,7 @@ function detectModules(){
   for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b);
     if(map[a]===map[b]) sumIn[rank.get(map[a])]+=2*ew(e); }
   let Q=0; for(let c=1;c<=nC;c++) Q+=sumIn[c]/m2 - (sumTot[c]/m2)**2;
-  const guildMode = layerRank && layerRank!==BASE_RANK;
+  const guildMode = !!(G.meta && G.meta.trait_ref);
   $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} ${guildMode?"guilds":"modules"}${onFiltered?" · filtered view":""}`;
   $("#modhint").style.display="none";
   document.querySelector("[data-sec=modules]")?.classList.remove("collapsed");  // reveal results
@@ -1449,7 +1450,7 @@ function detectModules(){
   const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
   const enr = $("#modenrich").checked ? computeEnrichment() : {};
   const fsig = guildTraitSignatures(byMod);   // functional signature per guild (layer only)
-  const isGuild = layerRank && layerRank!==BASE_RANK;
+  const isGuild = !!(G.meta && G.meta.trait_ref);
   const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
     const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
@@ -2117,7 +2118,7 @@ $("#subgcov").onclick=toggleCoverage;
 $("#subgscrub").oninput=e=>focusSubgraph(+e.target.value);
 $("#subgprev").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.max(0,(subgIdx<0?0:subgIdx-1))); };
 $("#subgnext").onclick=()=>{ if(subgraphs.length) focusSubgraph(Math.min(subgraphs.length-1,(subgIdx<0?0:subgIdx+1))); };
-$("#moddetect").onclick=()=>busy((layerRank!==BASE_RANK?"Detecting guilds":"Detecting modules")+" (Louvain)…", detectModules);
+$("#moddetect").onclick=()=>busy(((G.meta&&G.meta.trait_ref)?"Detecting guilds":"Detecting modules")+" (Louvain)…", detectModules);
 $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modenrich").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
