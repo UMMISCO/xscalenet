@@ -310,6 +310,8 @@
       <h2>Edge filters</h2>
       <label class="row"><span class="lh"><span id="eclabel">min |ecorr|</span> <b id="ecv"></b></span>
         <input type="range" id="ec" min="0" max="1" step="0.001"></label>
+      <button class="btn" id="ecrec" style="width:100%;justify-content:center;margin:2px 0 4px;font-size:12px"
+        title="Set the min-strength threshold that best fits a scale-free degree distribution (Barabási / WGCNA)">⚡ Recommend threshold (scale-free)</button>
       <div class="seg" id="sign" style="margin:8px 0">
         <button data-v="all" class="on">both ±</button>
         <button data-v="pos">positive</button>
@@ -1717,9 +1719,12 @@ function recommend(){
     if(!best||score>best.score) best={t,score,...fit,frac};
   }
   recBest=best;
-  const r=$("#rec");
-  if(!best){ r.textContent=""; $("#applyrec").style.display="none"; return; }
+  const r=$("#rec"), erb=$("#ecrec");
+  if(!best){ r.textContent=""; $("#applyrec").style.display="none";
+    if(erb){ erb.disabled=true; erb.style.opacity=".5"; erb.textContent="⚡ Recommend threshold (scale-free)"; } return; }
   $("#applyrec").style.display="";
+  if(erb){ erb.disabled=false; erb.style.opacity="1";
+    erb.textContent=`⚡ Recommend: min ${edgeLabel} ≈ ${best.t.toFixed(3)} · keeps ${Math.round(best.frac*100)}%`; }
   r.innerHTML=`Recommended min ${edgeSigned?"|"+edgeLabel+"|":edgeLabel} ≈ <b>${best.t.toFixed(3)}</b> `+
     `(γ=${best.gamma.toFixed(2)}, R²=${best.r2.toFixed(3)}, keeps ${Math.round(best.frac*100)}% of nodes). `+
     `<span class="hint">Maximises power-law fit of the degree distribution (Barabási / WGCNA scale-free criterion).</span>`;
@@ -2081,8 +2086,10 @@ applyCollapse();
 $("#layerseg").onclick=e=>{ const b=e.target.closest("button[data-r]"); if(!b||b.dataset.r===layerRank) return;
   layerRank=b.dataset.r; $("#layerseg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.r===layerRank));
   applyLayer(); };
-$("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
-  ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); };
+function applyRecommended(){ if(!recBest)return; const ec=$("#ec");
+  ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); }
+$("#applyrec").onclick=applyRecommended;
+$("#ecrec").onclick=applyRecommended;   // same action, always visible in Edge filters
 
 // ---------- ATC propagation ----------
 function setProp(s){
