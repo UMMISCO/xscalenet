@@ -24,12 +24,15 @@ try{
   S.textContent='wasm loaded ('+((performance.now()-t0)|0)+' ms). reconstructing…';
   const M=makeMatrix();
   const t1=performance.now();
-  const jsonStr = reconstruct(M, 'aracne', '0.3', false, false);
+  const jsonStr = reconstruct(M, 'aracne', '0.3', false, false, '', '');
   const g=JSON.parse(jsonStr);
   const dt=((performance.now()-t1)|0);
+  const n0=g.nodes[0]||{};
   S.innerHTML='<b style="color:green">✓ reconstructed in '+dt+' ms</b> — '+g.nodes.length+' nodes, '+g.edges.length+' edges, k='+g.meta.k;
-  O.textContent = 'meta: '+JSON.stringify(g.meta,null,1)+'\n\nfirst edges:\n'+
-    g.edges.slice(0,10).map(e=>'  '+e.source+' — '+e.target+'  ecorr='+(e.ecorr==null?'·':(+e.ecorr).toFixed(3))).join('\n');
+  O.textContent = 'meta: '+JSON.stringify(g.meta,null,1)+
+    '\n\nfirst node (rich): '+JSON.stringify(n0)+
+    '\n\nfirst edges:\n'+
+    g.edges.slice(0,8).map(e=>'  '+e.source+' — '+e.target+'  ecorr='+(e.ecorr==null?'·':(+e.ecorr).toFixed(3))+'  orient='+e.orient).join('\n');
 }catch(err){
   S.innerHTML='<b style="color:red">✗ '+String(err)+'</b>';
   O.textContent=(err&&err.stack)||String(err);

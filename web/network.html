@@ -2101,11 +2101,20 @@ $("#file").onchange=ev=>{ const f=ev.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ resize(); stateKey="file:"+f.name; loadBase(JSON.parse(rd.result)); }
     catch(e){ alert("Invalid graph.json: "+e); } }; rd.readAsText(f); };  // (loadBase set below)
 
-// ---------- import: raw matrix -> reconstruction via xscalenet-web ----------
-let hasServer=false;
+// ---------- import: raw matrix -> reconstruction (server, or client-side wasm) ----------
+let hasServer=false, wasmMod=null;
 fetch("health").then(r=>{ hasServer=r.ok; }).catch(()=>{});
+// Lazily load the in-browser reconstruction engine (compiled from the Rust core).
+async function loadWasm(){ if(wasmMod) return wasmMod;
+  const m=await import("./wasm/xscalenet.js"); await m.default(); wasmMod=m; return m; }
+// Read a matrix file as text, transparently gunzipping .gz in the browser.
+async function readMatrix(f){
+  if(/\.gz$/i.test(f.name) && "DecompressionStream" in window){
+    return await new Response(f.stream().pipeThrough(new DecompressionStream("gzip"))).text(); }
+  return await f.text(); }
 $("#importbtn").onclick=()=>{ $("#importmask").style.display="flex";
-  $("#impstatus").innerHTML = hasServer?"" : '⚠ start <code>xscalenet-web</code> to enable reconstruction'; };
+  $("#impstatus").innerHTML = hasServer ? ""
+    : '⚡ No server — will reconstruct <b>in your browser</b> (wasm, single-thread; best for small matrices).'; };
 $("#impcancel").onclick=()=>{ $("#importmask").style.display="none"; };
 $("#importmask").onclick=e=>{ if(e.target.id==="importmask") $("#importmask").style.display="none"; };
 $("#imprun").onclick=async()=>{
@@ -2120,13 +2129,28 @@ $("#imprun").onclick=async()=>{
   fd.append("thresh", $("#impthresh").value.trim()||"0.3");
   const an=$("#impannot").files[0];
   if(an){ fd.append("annotation", an); if($("#impcol").value.trim()) fd.append("atc_col",$("#impcol").value.trim()); }
-  $("#imprun").disabled=true; $("#impstatus").innerHTML="⏳ reconstructing… (this can take seconds to minutes on large matrices)";
+  $("#imprun").disabled=true;
+  $("#impstatus").innerHTML = hasServer ? "⏳ reconstructing… (this can take seconds to minutes on large matrices)"
+    : "⏳ reconstructing in your browser (wasm)…";
   const t0=performance.now();
   try{
-    const r=await fetch("run",{method:"POST", body:fd});
-    if(!r.ok){ throw new Error((await r.text())||("HTTP "+r.status)); }
-    const g=await r.json();
-    g.meta=Object.assign({title:"Imported — "+f.name, source:`xscalenet reconstruction · ${((performance.now()-t0)/1000).toFixed(1)}s`}, g.meta||{});
+    let g;
+    if(hasServer){
+      const r=await fetch("run",{method:"POST", body:fd});
+      if(!r.ok){ throw new Error((await r.text())||("HTTP "+r.status)); }
+      g=await r.json();
+    } else {
+      // client-side: run the wasm engine on the matrix text (no server needed)
+      const w=await loadWasm();
+      const text=await readMatrix(f);
+      const anFile=$("#impannot").files[0];
+      const anText=anFile ? await readMatrix(anFile) : "";
+      g=JSON.parse(w.reconstruct(text, ms.join(",")||"aracne", $("#impthresh").value.trim()||"0.3",
+        $("#imptranspose").checked, $("#impdisc").checked, anText, $("#impcol").value.trim()));
+    }
+    const src = hasServer ? `xscalenet reconstruction · ${((performance.now()-t0)/1000).toFixed(1)}s`
+      : `in-browser (wasm) · ${((performance.now()-t0)/1000).toFixed(1)}s`;
+    g.meta=Object.assign({title:"Imported — "+f.name, source:src}, g.meta||{});
     $("#importmask").style.display="none";
     resize(); stateKey="import:"+f.name; loadBase(g);
     flash(`Reconstructed ${g.nodes.length} nodes / ${g.edges.length} edges`);

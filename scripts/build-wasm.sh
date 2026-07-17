@@ -14,9 +14,13 @@
 #
 # NOTE: on a Homebrew rust + rustup setup, `cargo`/`rustc` on PATH may be the
 # Homebrew ones (older). This script pins RUSTC to the rustup nightly explicitly.
-# NOTE: a `--release` link may crash `rust-lld` on some nightlies; the debug
-# artifact (processed by wasm-bindgen to ~2.3 MB) works. Post-shrink with
-# `wasm-opt -Oz` (binaryen) once a working release linker is available.
+# NOTE: some nightlies ship a rust-lld whose @rpath can't find libLLVM.dylib
+# ("Library not loaded: @rpath/libLLVM.dylib"), which SIGABRTs at link. The lib
+# IS in the toolchain, just off rust-lld's search path — symlink it in:
+#     NT=$(rustup which --toolchain nightly rustc | xargs dirname)/..
+#     ln -sf "$NT/lib/libLLVM.dylib" \
+#            "$NT/lib/rustlib/aarch64-apple-darwin/lib/libLLVM.dylib"
+# Then --release links fine (~0.5 MB wasm). Shrink further with `wasm-opt -Oz`.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
