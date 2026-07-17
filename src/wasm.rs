@@ -6,11 +6,10 @@
 //! the web frontend can load directly — no server, all client-side.
 #![cfg(feature = "wasm")]
 
-use serde_json::json;
 use wasm_bindgen::prelude::*;
 
 use crate::data::Dataset;
-use crate::pipeline::{run, RunConfig};
+use crate::pipeline::RunConfig;
 use crate::scalenet::{Method, Params};
 use crate::{discretize, io};
 
@@ -20,8 +19,11 @@ use crate::{discretize, io};
 ///   `transpose`).
 /// * `methods_csv` — e.g. `"aracne"` or `"aracne,bayes_hc"` (default: aracne).
 /// * `thresh_csv` — presence-frequency thresholds, e.g. `"0.3"` (default 0.3).
+/// * `annotation` — optional annotation-table text (id + attribute columns); empty = none.
+/// * `color_by` — optional colour-by column name; empty = auto.
 ///
-/// Returns a `graph.json` string, or a JS error.
+/// Returns the same **rich** `graph.json` the server produces (per-node metrics +
+/// annotation + ATC, consensus edges, `atc_trace`, spectral subgraphs), or a JS error.
 #[wasm_bindgen]
 pub fn reconstruct(
     matrix_text: &str,
@@ -29,17 +31,30 @@ pub fn reconstruct(
     thresh_csv: &str,
     transpose: bool,
     discretize_flag: bool,
+    annotation: &str,
+    color_by: &str,
 ) -> Result<String, JsValue> {
-    reconstruct_inner(matrix_text, methods_csv, thresh_csv, transpose, discretize_flag)
-        .map_err(|e| JsValue::from_str(&e))
+    reconstruct_inner(
+        matrix_text,
+        methods_csv,
+        thresh_csv,
+        transpose,
+        discretize_flag,
+        annotation,
+        color_by,
+    )
+    .map_err(|e| JsValue::from_str(&e))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reconstruct_inner(
     matrix_text: &str,
     methods_csv: &str,
     thresh_csv: &str,
     transpose: bool,
     discretize_flag: bool,
+    annotation: &str,
+    color_by: &str,
 ) -> Result<String, String> {
     // Load matrix (+ optional transpose / discretize) — the same path as the CLI.
     let text = if transpose {
@@ -94,40 +109,10 @@ fn reconstruct_inner(
         iterative_eigen: false,
     };
     let config = RunConfig { methods, params };
-    let result = run(&data, &config, |_| {})?;
 
-    // Minimal graph.json: nodes + the consensus edges (last threshold). Enough to
-    // visualize (colour by ecorr sign, filter by |ecorr|, layout, …); richer
-    // annotation/metrics are added client-side or via the server path.
-    let names = &result.nodes;
-    let cons = result
-        .consensus
-        .last()
-        .ok_or_else(|| "no consensus network produced".to_string())?;
-    let edges: Vec<_> = cons
-        .network
-        .edges
-        .iter()
-        .map(|e| {
-            json!({
-                "source": names[e.source],
-                "target": names[e.target],
-                "ecorr": e.ecorr,
-                "score": e.presence_score,
-            })
-        })
-        .collect();
-    let nodes: Vec<_> = names.iter().map(|n| json!({ "id": n })).collect();
-    let g = json!({
-        "meta": {
-            "title": format!("Imported — {} features (wasm)", names.len()),
-            "source": format!("in-browser reconstruction · {} edges · k={}", edges.len(), result.spectral.k),
-            "directed": false,
-            "k": result.spectral.k,
-            "subset_m": result.spectral.subset_m,
-        },
-        "nodes": nodes,
-        "edges": edges,
-    });
-    Ok(g.to_string())
+    // Same rich graph.json as the server (metrics + annotation + ATC + subgraphs).
+    let title = format!("Imported — {} features (wasm)", data.ncol());
+    let annotation = if annotation.trim().is_empty() { None } else { Some(annotation) };
+    let color_by = if color_by.trim().is_empty() { None } else { Some(color_by) };
+    crate::graphjson::build(&title, &data, &config, false, 0, annotation, color_by)
 }

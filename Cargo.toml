@@ -24,11 +24,13 @@ default = ["parallel"]
 # Multi-threaded core (Rayon). On by default; turn OFF for single-thread targets
 # like wasm32 (`--no-default-features --features wasm`), which use a sequential shim.
 parallel = ["dep:rayon"]
+# Rich graph.json builder shared by the server and the wasm build.
+graphjson = ["dep:serde_json"]
 # `xscalenet-web` server: axum + tokio + static file serving + JSON building.
-web = ["parallel", "dep:axum", "dep:tokio", "dep:tower-http", "dep:serde_json"]
+web = ["parallel", "graphjson", "dep:axum", "dep:tokio", "dep:tower-http"]
 # In-browser reconstruction: compile the core to wasm32 with wasm-bindgen glue.
 # Build with: `cargo build --lib --no-default-features --features wasm --target wasm32-unknown-unknown`.
-wasm = ["dep:wasm-bindgen", "dep:serde_json"]
+wasm = ["graphjson", "dep:wasm-bindgen"]
 
 [dependencies]
 nalgebra = "0.33"

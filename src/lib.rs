@@ -22,6 +22,9 @@ pub mod network;
 pub mod output;
 /// Sequential Rayon shim, compiled only when the `parallel` feature is off.
 mod par;
+/// Rich `graph.json` builder shared by the server and the wasm build.
+#[cfg(feature = "graphjson")]
+pub mod graphjson;
 /// In-browser (wasm-bindgen) reconstruction entry point, `--features wasm`.
 #[cfg(feature = "wasm")]
 pub mod wasm;
