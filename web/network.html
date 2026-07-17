@@ -224,7 +224,7 @@
     </div>
 
     <div class="sec cl collapsed" style="order:7">
-      <h2>Modularity <span class="hint" id="modq"></span></h2>
+      <h2><span id="modtitle">Modularity</span> <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted);margin-top:4px">
@@ -452,8 +452,10 @@ function taxonEnrichment(g, memberList, themes){
   if(!tests.length) return {};
   tests.sort((x,y)=>x.p-y.p); const M=tests.length; let minq=1;
   for(let i=M-1;i>=0;i--){ tests[i].q=minq=Math.min(minq, tests[i].p*M/(i+1)); }
-  const best={}; for(const tt of tests){ if(!best[tt.t]||tt.q<best[tt.t].q) best[tt.t]=tt; }
-  return best;
+  // per-taxon: ALL significant signatures (q<0.05), strongest first.
+  const byTaxon={}; for(const tt of tests){ if(tt.q<0.05)(byTaxon[tt.t]=byTaxon[tt.t]||[]).push(tt); }
+  for(const t in byTaxon) byTaxon[t].sort((a,b)=>a.q-b.q);
+  return byTaxon;
 }
 
 // The FunNet **functional layer** for a taxonomic rank: propagate taxon
@@ -486,11 +488,12 @@ function funnetLayer(g, rank){
     const ms=memberList[t]; const pc={};
     ms.forEach(x=>{const p=x.phylum_group||x.phylum||"NA"; pc[p]=(pc[p]||0)+1;});
     const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0];
-    const e=enr[t];
+    const list=enr[t], e=list&&list[0];
     const nd={ id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t, members:ms.length,
              x:(coords[j][0]-minx)/spanx*S - S/2, y:(coords[j][1]-miny)/spany*S - S/2 };
-    if(e && e.q<0.05){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn;
-      nd.enr_score=-Math.log10(e.q); }
+    if(e){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn;
+      nd.enr_score=-Math.log10(e.q);
+      nd.enr_list=list.slice(0,8).map(x=>({f:x.field,v:x.val,a:x.a,nn:x.nn,q:x.q})); }
     else nd.enr_score=0;
     return nd;
   });
@@ -799,6 +802,13 @@ function load(g){
   atcRecomputed=false;
   selected=new Set(); focus=null;   // node indices are graph-specific — reset on (re)load
   $("#modq").textContent=""; $("#modlist").innerHTML=""; $("#modhint").style.display="";
+  // on a functional layer, Louvain reveals functional *guilds* of taxa — say so.
+  const onLayer = layerRank && layerRank!=="species";
+  $("#modtitle").textContent = onLayer ? "Functional guilds" : "Modularity";
+  $("#moddetect").textContent = onLayer ? "Detect guilds (Louvain)" : "Detect modules (Louvain)";
+  $("#modhint").textContent = onLayer
+    ? "Cluster the proximity network into functional guilds of taxa (Louvain), then colour by guild and check whether guilds are taxonomically coherent."
+    : "Partition the network into communities that maximise modularity, then colour by module.";
   // Fixed layout: use igraph coordinates from the graph when present (y flipped
   // to match the R/igraph plot, whose y points up). Otherwise force-layout.
   hasFixedLayout = (g.nodes||[]).length>0 && g.nodes.every(n=>Number.isFinite(+n.x)&&Number.isFinite(+n.y)) && ('x' in (g.nodes[0]||{}));
@@ -1593,7 +1603,9 @@ function inspect(i, pinned){
     (n.label&&n.members==null?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
     (pinned?nodeActions(i):"")+
     (n.members!=null?row2("species (members)",n.members):"")+
-    (n.enrich?`<div class="kv"><span class="k">enriched</span><b title="Fisher over-representation, BH-adjusted">▲ ${n.enrich} · ${n.enrich_a}/${n.enrich_nn} · q=${fmtQ(n.enrich_q)}</b></div>`:"")+
+    (n.enr_list?.length?`<div class="kv" style="align-items:flex-start"><span class="k">enriched</span>`+
+      `<div style="text-align:right">${n.enr_list.map(e=>
+        `<div title="Fisher over-representation, BH-adjusted"><b>▲ ${e.f}=${e.v}</b> <span class="k">${e.a}/${e.nn} · q=${fmtQ(e.q)}</span></div>`).join("")}</div></div>`:"")+
     row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
     row2(n.members!=null?"between-taxa degree":"degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
     (prop.step!=null && runAtcAt(i)!=null?row2(`ATC @step ${prop.step} (of ${(+n.atc).toFixed(4)})`, runAtcAt(i).toFixed(4)):
