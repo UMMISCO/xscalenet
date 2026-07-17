@@ -1,0 +1,11 @@
+{
+  "id": "flickr",
+  "title": "Flickr image graph",
+  "domain": "social / image",
+  "source": "SNAP flickrEdges + MIR tag features (local)",
+  "graph": "flickr.graph.json",
+  "color_by": "tag",
+  "ranks": ["photo", "tag"],
+  "atc_by": "tag",
+  "note": "Photos sharing context; each photo's dominant MIR tag (sky / nikon / portrait …) as its annotation."
+}

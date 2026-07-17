@@ -1,0 +1,11 @@
+{
+  "id": "scapis",
+  "title": "SCAPIS gut microbiome",
+  "domain": "microbiome",
+  "source": "SCAPIS spectral-consensus reconstruction (client data)",
+  "graph": "scapis2417.graph.json",
+  "color_by": "phylum",
+  "atc_by": "phylum",
+  "client_data": true,
+  "note": "2417 MSP, GTDB 220 taxonomy + MSP functional traits. Client data — not bundled in the repo."
+}

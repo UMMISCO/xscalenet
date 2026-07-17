@@ -1,0 +1,11 @@
+{
+  "id": "amazon",
+  "title": "Amazon co-purchase",
+  "domain": "e-commerce",
+  "source": "SNAP amazon0601 + amazon-meta (local)",
+  "graph": "amazon.graph.json",
+  "color_by": "group",
+  "ranks": ["product", "cat3", "cat2", "cat1", "group"],
+  "atc_by": "group",
+  "note": "Products co-purchased; group (Book/Music/DVD/Video) → category hierarchy. On the cat2 functional layer, Louvain guilds separate music genres / book subjects / video."
+}

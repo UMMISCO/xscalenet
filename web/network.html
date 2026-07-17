@@ -193,6 +193,10 @@
     <div class="results" id="searchresults"></div>
   </div>
   <div class="grow"></div>
+  <div class="menu">
+    <button class="btn" id="projbtn" title="Switch between the networks in the project workspace">⊞ Networks ▾</button>
+    <div class="menulist" id="projmenu" style="min-width:280px"><div style="padding:8px 10px;color:var(--muted);font-size:12px">loading…</div></div>
+  </div>
   <button class="btn" id="importbtn" title="Reconstruct a network from a raw matrix (needs the local xscalenet-web server)">⬆ Import data</button>
   <div class="menu">
     <button class="btn" id="exportbtn">⬇ Export ▾</button>
@@ -2044,7 +2048,27 @@ $("#modweight").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modfiltered").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#modenrich").onchange=()=>{ if($("#modlist").innerHTML) detectModules(); };
 $("#exportbtn").onclick=e=>{ e.stopPropagation(); $("#exportmenu").classList.toggle("open"); };
-document.addEventListener("click", ()=>$("#exportmenu").classList.remove("open"));
+document.addEventListener("click", ()=>{ $("#exportmenu").classList.remove("open"); $("#projmenu").classList.remove("open"); });
+
+// ---------- project workspace: network selector (reads web/projects.json) ----------
+$("#projbtn").onclick=e=>{ e.stopPropagation(); $("#projmenu").classList.toggle("open"); };
+$("#projmenu").onclick=e=>e.stopPropagation();
+(function loadProjects(){
+  fetch("projects.json").then(r=>r.ok?r.json():Promise.reject()).then(idx=>{
+    const cur=new URLSearchParams(location.search).get("graph");
+    const items=(idx.projects||[]).map(p=>{
+      const on = cur ? cur===p.graph : false;
+      const dim = p.available===false;
+      return `<button data-graph="${p.graph}" ${dim?'style="opacity:.5"':''} title="${(p.note||'').replace(/"/g,'&quot;')}">`+
+        `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">`+
+        `<b>${on?'● ':''}${p.title}</b><span style="color:var(--muted);font-size:11px">${p.domain||''}</span></div>`+
+        `<div style="color:var(--muted);font-size:11px;margin-top:2px">${dim?'not generated — see project/'+p.id:p.note||''}</div></button>`;
+    }).join("");
+    $("#projmenu").innerHTML = items || '<div style="padding:8px 10px;color:var(--muted);font-size:12px">no projects.json</div>';
+    $("#projmenu").querySelectorAll("button[data-graph]").forEach(b=>b.onclick=()=>{
+      const g=b.dataset.graph; if(g && g!==cur) location.href = "?graph="+encodeURIComponent(g); });
+  }).catch(()=>{ $("#projmenu").innerHTML='<div style="padding:8px 10px;color:var(--muted);font-size:12px">no project workspace (projects.json)</div>'; });
+})();
 $("#exportmenu").onclick=e=>{ const x=e.target.dataset?.x; if(!x)return;
   $("#exportmenu").classList.remove("open");
   ({png:exportPNG, nodes:exportNodesCSV, edges:exportEdgesCSV, graph:exportGraphJSON})[x]?.(); };

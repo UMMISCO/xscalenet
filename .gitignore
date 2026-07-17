@@ -14,3 +14,4 @@ web/wasm/*.d.ts
 target-wasm/
 web/amazon.graph.json
 web/flickr.graph.json
+web/projects.json
