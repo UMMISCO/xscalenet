@@ -123,9 +123,18 @@ graphs:
   tinted (viridis) by *how many* subgraphs project onto it — the dense spectral
   core where many subgraphs overlap glows bright, peripheral low-coverage nodes
   fade dark. (`?cov=1`)
-- **Taxonomic layers** — collapse the species network to any rank (genus →
-  phylum): each node becomes a taxon at its members' layout centroid, sized by
-  number of species, with between-taxa edges (width ∝ number of species-edges).
+- **Taxonomic layers (FunNet functional layer)** — collapse the species network
+  to any rank (genus → phylum) as the **FunNet / integranet functional layer**
+  (Prifti et al. 2008), *not* a geometric contraction: taxon membership is
+  propagated (L2-normalized) over the species network to co-inertia convergence
+  (RV ≥ 0.90), each taxon gets a node-profile, and taxa are linked by a
+  **self-tuning Gaussian affinity** between profiles (`exp(−d²/σ_aσ_b)`,
+  Zelnik-Manor–Perona). Two taxa are close if their footprints diffuse to the
+  same regions — capturing indirect, higher-order relations, not just direct
+  species contacts. Laid out by **classic (Torgerson) MDS** of the profile
+  distances, so spatial proximity ≈ functional proximity. Nodes sized by number
+  of species. This is a faithful in-browser port of the engine's
+  [`multilayer.rs`](../src/multilayer.rs), validated against R to ~1e-8.
 - **Layout** — a selector: *original (igraph)* when nodes carry `x`/`y` (e.g.
   exported from the R igraph object's layout matrix), *force-directed*, *circular
   (by phylum)*, *concentric (by degree)*, and *grid (by phylum)*.
