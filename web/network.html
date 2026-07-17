@@ -1437,15 +1437,29 @@ function render(){
     else if(pathOn && nbr.has(n.i)){ CTX.lineWidth=1.8/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else { CTX.lineWidth=0.7/view.k; CTX.strokeStyle=COL.panel; CTX.stroke(); }
-    // labels on the functional layer: taxon name + enrichment signature. Screen
-    // radius = r*view.k; label big-enough nodes always, the rest when zoomed in.
-    if(isLayer && (labelAll || r*view.k>=5)){ const fs=11/view.k; CTX.font=`${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
-      CTX.fillStyle=COL.ink; CTX.textAlign="center"; CTX.textBaseline="bottom";
-      CTX.fillText(n.label||n.id, n.x, n.y-r-2/view.k);
-      if(n.enrich){ CTX.fillStyle=COL.muted; CTX.textBaseline="top";
-        CTX.fillText(`▲ ${n.enrich} · q=${fmtQ(n.enrich_q)}`, n.x, n.y+r+2/view.k); } }
   }
   CTX.globalAlpha=1; CTX.restore();
+  if(isLayer) drawLayerLabels(labelAll);
+}
+// Labels for the functional layer, in screen space with greedy collision-skip:
+// bigger taxa win, a label is dropped if it would overlap an already-placed one.
+function drawLayerLabels(labelAll){
+  CTX.save(); CTX.font="11px -apple-system,BlinkMacSystemFont,sans-serif"; CTX.textAlign="center";
+  const placed=[], hit=(b)=>placed.some(p=>!(b[0]>p[0]+p[2]||b[0]+b[2]<p[0]||b[1]>p[1]+p[3]||b[1]+b[3]<p[1]));
+  const cands=[];
+  for(const n of nodes){ if(!VIS.visN.has(n.i)) continue; const rs=radiusOf(n.i);
+    if(!(labelAll || rs>=5)) continue;
+    cands.push({n, rs, x:view.x+n.x*view.k, y:view.y+n.y*view.k}); }
+  cands.sort((a,b)=>b.rs-a.rs);
+  for(const c of cands){
+    const txt=c.n.label||c.n.id, w=CTX.measureText(txt).width, box=[c.x-w/2-2, c.y-c.rs-15, w+4, 14];
+    if(hit(box)) continue; placed.push(box);
+    CTX.fillStyle=COL.ink; CTX.textBaseline="bottom"; CTX.fillText(txt, c.x, c.y-c.rs-2);
+    if(c.n.enrich){ const et=`▲ ${c.n.enrich} · q=${fmtQ(c.n.enrich_q)}`, ew=CTX.measureText(et).width,
+        eb=[c.x-ew/2-2, c.y+c.rs+1, ew+4, 13];
+      if(!hit(eb)){ placed.push(eb); CTX.fillStyle=COL.muted; CTX.textBaseline="top"; CTX.fillText(et, c.x, c.y+c.rs+2); } }
+  }
+  CTX.restore();
 }
 function neighbors(i){ const s=new Set([i]); for(const e of VIS.edges){ if(e.a===i)s.add(e.b); if(e.b===i)s.add(e.a);} return s; }
 // indices of `seed` plus their direct neighbours over `es` (one ring)
