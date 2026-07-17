@@ -1500,8 +1500,13 @@ function propColor(i){
   // stable. Don't let its colour vanish — fall back to its annotation (theme)
   // colour. Only genuinely unannotated nodes go grey.
   if(tot<=1e-12){
-    const pg=nodes[i].phylum_group||nodes[i].phylum;
-    return (pg && G.themes && G.themes.includes(pg)) ? taxColor(pg) : "#b9c0cb";
+    // fall back to the node's OWN annotation theme colour (the propagation
+    // annotation field, or the colour-by field) — generic across domains.
+    const cf=(G.atc_trace&&G.atc_trace.annotation)||(G.meta&&G.meta.color_by);
+    const v=cf?nodes[i][cf]:(nodes[i].phylum_group||nodes[i].phylum);
+    const k=(v&&G.themes)?G.themes.indexOf(v):-1;
+    if(k>=0 && themeRGB[k]) return `rgb(${themeRGB[k][0]},${themeRGB[k][1]},${themeRGB[k][2]})`;
+    return "#b9c0cb";
   }
   let r=0,g=0,b=0; for(let j=0;j<row.length;j++){ const w=row[j]/tot;
     r+=w*themeRGB[j][0]; g+=w*themeRGB[j][1]; b+=w*themeRGB[j][2]; }
