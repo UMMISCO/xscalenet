@@ -28,6 +28,10 @@ def main():
                  "directed": False, "color_by": "theme", "annotation_source": "reference m0"}
     g["color_groups"] = groups
     g["color_map"] = cmap
+    # the propagation player recolours nodes only when colour-by == the trace's
+    # annotation; tie the trace to the `theme` field so the animation shows.
+    if g.get("atc_trace") is not None:
+        g["atc_trace"]["annotation"] = "theme"
     json.dump(g, open(OUT, "w"))
     print(f"wrote {os.path.abspath(OUT)} — {len(g['nodes'])} nodes, colour by theme")
 

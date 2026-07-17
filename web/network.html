@@ -989,7 +989,7 @@ function colorOf(n){
   // During propagation, blend by the theme mix ONLY when colouring by the ATC
   // annotation itself; otherwise (module, family, …) keep the chosen colour so
   // it isn't overwritten — only the node size animates.
-  if(prop.step!=null && colorField===(G.atc_trace&&G.atc_trace.annotation)) return propColor(n.i);
+  if(prop.step!=null && colorField===(G.atc_trace&&(G.atc_trace.annotation||G.meta&&G.meta.color_by))) return propColor(n.i);
   return gcolor[groupOf(n)]||n.color||"#8b949e";
 }
 
@@ -1565,7 +1565,7 @@ function render(){
     CTX.globalAlpha=on?1:0.12;
     // during propagation (coloured by the annotation) draw a pie of the theme mix
     // when "pie charts" is chosen; otherwise a solid (blended / chosen) fill.
-    if(prop.step!=null && propStyle==="pie" && colorField===(G.atc_trace&&G.atc_trace.annotation) && trace[prop.step]?.config?.[n.i]){
+    if(prop.step!=null && propStyle==="pie" && colorField===(G.atc_trace&&(G.atc_trace.annotation||G.meta&&G.meta.color_by)) && trace[prop.step]?.config?.[n.i]){
       drawPie(n.x,n.y,r,trace[prop.step].config[n.i], n.i);
     } else {
       CTX.beginPath(); CTX.arc(n.x,n.y,r,0,7); CTX.fillStyle=colorOf(n); CTX.fill();
