@@ -481,7 +481,9 @@ function funnetLayer(g, rank){
     const e=enr[t];
     const nd={ id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t, members:ms.length,
              x:(coords[j][0]-minx)/spanx*S - S/2, y:(coords[j][1]-miny)/spany*S - S/2 };
-    if(e && e.q<0.05){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn; }
+    if(e && e.q<0.05){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn;
+      nd.enr_score=-Math.log10(e.q); }
+    else nd.enr_score=0;
     return nd;
   });
   // MDS can stack taxa with near-identical profiles; gently push coincident nodes
@@ -745,9 +747,11 @@ function recomputeAtc(){
 
 // ---------- load ----------
 function setupSizeBy(preserve){
-  const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null);
-  const sizeOpts=[["degree","degree"]];
+  const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null),
+        hasEnr=nodes.some(n=>n.enr_score>0);
+  const sizeOpts=[["degree", layerRank!=="species"?"functional degree":"degree"]];
   if(hasMembers) sizeOpts.push(["members","taxon size (# species)"]);
+  if(hasEnr) sizeOpts.push(["enr_score","enrichment (−log q)"]);
   if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
   const keep=sizeBy;
   $("#sizeby").innerHTML=sizeOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
@@ -755,7 +759,8 @@ function setupSizeBy(preserve){
   $("#sizeby").value=sizeBy;
   sizeMax={ atc:Math.max(1e-9,...nodes.map(n=>+n.atc||0)),
             atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)),
-            members:Math.max(1e-9,...nodes.map(n=>+n.members||0)) };
+            members:Math.max(1e-9,...nodes.map(n=>+n.members||0)),
+            enr_score:Math.max(1e-9,...nodes.map(n=>+n.enr_score||0)) };
 }
 // ATC propagation trace setup (from graph_atc enrichment OR an in-browser recompute)
 function setupProp(){
@@ -1332,8 +1337,12 @@ function radiusOf(i){
     return 2.5+13*Math.sqrt(Math.max(0,v/(mx||1)));
   }
   if(sizeBy==="degree") return 2.2+2.4*Math.sqrt(VIS.deg[i]||0);
+  // #species per taxon is very skewed (one phylum ≫ the rest) → log-scale so small
+  // taxa stay visible instead of collapsing to a dot.
+  if(sizeBy==="members"){ const v=+nodes[i].members||1, mx=sizeMax.members||1;
+    return 3+11*Math.log1p(v)/Math.log1p(mx); }
   const v=(+nodes[i][sizeBy])||0, mx=sizeMax[sizeBy]||1;
-  return 2.5+9*Math.sqrt(Math.max(0,v/mx));
+  return 3+10*Math.sqrt(Math.max(0,v/mx));
 }
 // running ATC value of node i at the current step (for tooltip/inspector)
 function runAtcAt(i){ return (prop.step!=null && runAtc) ? runAtc[prop.step][i] : null; }
@@ -1372,8 +1381,11 @@ function render(){
   persist();   // debounced; captures pan/zoom, size-by, sim/drag positions
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
-  // label taxa on the (small) functional layer — anonymous dots aren't useful there.
-  const showLabels = layerRank!=="species" && nodes.length<=60;
+  // Label taxa on the functional layer. Anonymous dots aren't useful, but at fine
+  // ranks (100s of taxa) labelling everything is a mess — so always label the
+  // bigger nodes, label all when few taxa, and reveal the rest as you zoom in.
+  const isLayer = layerRank!=="species";
+  const labelAll = isLayer && (nodes.length<=60 || view.k>=1.5);
   // emphasis: a shortest path (2 selected) > pinned selection ego > hover.
   const pathOn = pathNodes.length>1;
   const nbr = pathOn ? new Set(pathNodes)
@@ -1417,8 +1429,9 @@ function render(){
     else if(pathOn && nbr.has(n.i)){ CTX.lineWidth=1.8/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else { CTX.lineWidth=0.7/view.k; CTX.strokeStyle=COL.panel; CTX.stroke(); }
-    // labels on the (small) functional layer: taxon name + enrichment signature
-    if(showLabels){ const fs=11/view.k; CTX.font=`${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    // labels on the functional layer: taxon name + enrichment signature. Screen
+    // radius = r*view.k; label big-enough nodes always, the rest when zoomed in.
+    if(isLayer && (labelAll || r*view.k>=5)){ const fs=11/view.k; CTX.font=`${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
       CTX.fillStyle=COL.ink; CTX.textAlign="center"; CTX.textBaseline="bottom";
       CTX.fillText(n.label||n.id, n.x, n.y-r-2/view.k);
       if(n.enrich){ CTX.fillStyle=COL.muted; CTX.textBaseline="top";
