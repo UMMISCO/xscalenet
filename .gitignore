@@ -8,3 +8,9 @@ web/scapis2417.graph.json
 web/s250.graph.json
 # client-data graph backups (e.g. from .private/tools/annotate_msp.py)
 web/*.graph.json.bak
+
+# generated wasm-bindgen artifacts (build via scripts/build-wasm.sh)
+web/wasm/xscalenet.js
+web/wasm/xscalenet_bg.wasm
+web/wasm/*.d.ts
+target-wasm/

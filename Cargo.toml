@@ -5,6 +5,10 @@ edition = "2021"
 description = "Efficient Rust reimplementation of the ScaleNet network reconstruction + Spectral Consensus Strategy (core path)"
 license = "GPL-3.0-or-later"
 
+# cdylib for the wasm-bindgen module; rlib kept so the bins/tests still link the lib.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "xscalenet"
 path = "src/main.rs"
@@ -29,7 +33,7 @@ wasm = ["dep:wasm-bindgen", "dep:serde_json"]
 [dependencies]
 nalgebra = "0.33"
 rayon = { version = "1.10", optional = true }
-wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen = { version = "=0.2.126", optional = true }
 libm = "0.2"
 # Pure-Rust gzip (miniz_oxide backend) so `.gz` input works with no system deps.
 flate2 = "1"

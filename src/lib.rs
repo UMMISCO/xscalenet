@@ -22,6 +22,9 @@ pub mod network;
 pub mod output;
 /// Sequential Rayon shim, compiled only when the `parallel` feature is off.
 mod par;
+/// In-browser (wasm-bindgen) reconstruction entry point, `--features wasm`.
+#[cfg(feature = "wasm")]
+pub mod wasm;
 pub mod pipeline;
 pub mod recon;
 pub mod scalefree;

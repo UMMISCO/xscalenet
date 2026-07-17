@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><title>xscalenet wasm POC</title>
+<style>body{font:13px monospace;padding:20px;max-width:900px}pre{background:#f4f4f4;padding:10px;overflow:auto;max-height:340px}</style>
+</head><body>
+<h3>xscalenet — in-browser reconstruction (wasm) POC</h3>
+<div id="status">loading wasm…</div>
+<pre id="out"></pre>
+<script type="module">
+import init, { reconstruct } from './xscalenet.js';
+const S = document.getElementById('status'), O = document.getElementById('out');
+// small synthetic matrix: 12 features × 40 samples, 3 correlated blocks + noise.
+function makeMatrix(){
+  const nF=12, nS=40, rng=(s=>()=>((s=(s*1103515245+12345)&0x7fffffff)/0x7fffffff))(42);
+  const rows=[];
+  const header=Array.from({length:nF},(_,j)=>'f'+(j+1)).join('\t'); rows.push(header);
+  const lat=Array.from({length:nS},()=>[rng(),rng(),rng()]);
+  for(let i=0;i<nS;i++){ const r=[];
+    for(let j=0;j<nF;j++){ const blk=Math.floor(j/4); const v=lat[i][blk]*8 + rng()*2; r.push(Math.round(v)); }
+    rows.push(r.join('\t')); }
+  return rows.join('\n');
+}
+try{
+  const t0=performance.now();
+  await init();
+  S.textContent='wasm loaded ('+((performance.now()-t0)|0)+' ms). reconstructing…';
+  const M=makeMatrix();
+  const t1=performance.now();
+  const jsonStr = reconstruct(M, 'aracne', '0.3', false, false);
+  const g=JSON.parse(jsonStr);
+  const dt=((performance.now()-t1)|0);
+  S.innerHTML='<b style="color:green">✓ reconstructed in '+dt+' ms</b> — '+g.nodes.length+' nodes, '+g.edges.length+' edges, k='+g.meta.k;
+  O.textContent = 'meta: '+JSON.stringify(g.meta,null,1)+'\n\nfirst edges:\n'+
+    g.edges.slice(0,10).map(e=>'  '+e.source+' — '+e.target+'  ecorr='+(e.ecorr==null?'·':(+e.ecorr).toFixed(3))).join('\n');
+}catch(err){
+  S.innerHTML='<b style="color:red">✗ '+String(err)+'</b>';
+  O.textContent=(err&&err.stack)||String(err);
+}
+</script>
+</body></html>
