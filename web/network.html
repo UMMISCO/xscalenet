@@ -377,7 +377,7 @@ function toggleCoverage(){
   render();
 }
 let down=null;            // pointer-down bookkeeping (to tell a click from a drag)
-let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null;
+let filt={ec:0, sign:"all", sc:0, topN:1, md:0}, recBest=null, ecMax=1;
 let sizeBy="degree", sizeMax={};
 // ATC propagation trace (present when the graph was enriched with graph_atc)
 let trace=[], themeRGB=[], prop={step:null, playing:false, timer:null};
@@ -848,6 +848,7 @@ function load(g){
   // ecorr slider range from data
   const absE=edges.map(e=>Math.abs(e.ecorr)).filter(v=>isFinite(v));
   const lo=absE.length?Math.min(...absE):0, hi=absE.length?Math.max(...absE):1;
+  ecMax=hi||1;   // edge thickness ∝ |ecorr|, normalized to the strongest edge
   const ec=$("#ec"); ec.min=(Math.floor(lo*100)/100).toFixed(2); ec.max=(Math.ceil(hi*100)/100).toFixed(2);
   ec.step=0.005; ec.value=ec.min; filt.ec=+ec.min;
   const sc=$("#sc"); const scs=edges.map(e=>e.score).filter(v=>isFinite(v));
@@ -1472,7 +1473,10 @@ function render(){
       CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke(); continue; }
     CTX.globalAlpha = on?(nbr?0.9:0.5):0.05;
     CTX.strokeStyle = e.ecorr<0 ? COL.neg : COL.pos;
-    CTX.lineWidth = (e.weight ? Math.min(5, 0.6+e.weight*0.5) : 0.8)/view.k; // width ∝ #edges (layer mode)
+    // width ∝ |ecorr| (correlation / functional-affinity strength), normalized to
+    // the strongest edge; falls back to a thin line when ecorr is missing.
+    const ae=Math.abs(e.ecorr);
+    CTX.lineWidth = (isFinite(ae) ? 0.3+3.2*Math.sqrt(Math.min(1, ae/ecMax)) : 0.7)/view.k;
     CTX.beginPath(); CTX.moveTo(a.x,a.y); CTX.lineTo(b.x,b.y); CTX.stroke();
   }
   CTX.globalAlpha=1;
