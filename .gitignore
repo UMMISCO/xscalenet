@@ -14,3 +14,5 @@ web/wasm/xscalenet.js
 web/wasm/xscalenet_bg.wasm
 web/wasm/*.d.ts
 target-wasm/
+web/amazon.graph.json
+web/flickr.graph.json

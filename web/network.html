@@ -386,6 +386,9 @@ let propStyle="blend";   // "blend" (solid mixed colour) or "pie" (theme pie cha
 // taxonomic-layer aggregation: the full species-level graph + current rank
 let baseGraph=null, layerRank="species";
 const RANKS=["species","genus","family","order","class","phylum"];
+// hierarchy generalization (set per-graph in loadBase): the aggregation ladder,
+// the base/full-network rank, and the field that colours aggregated taxa.
+let HIER=RANKS, BASE_RANK="species", GROUP_FIELD="phylum_group";
 
 // Canvas cannot use CSS var() strings — resolve theme colours to hex once.
 let COL={};
@@ -399,16 +402,23 @@ function readColors(){
 // ---------- taxonomic layer aggregation ----------
 function loadBase(g){
   baseGraph=g;
+  // Generalize the hierarchy: a graph may declare its own annotation ladder via
+  // meta.ranks (base/full network first, then fine → coarse aggregation levels),
+  // so the FunNet layer works on ANY domain — species→phylum, or product→group,
+  // etc. Falls back to the microbiome default. GROUP_FIELD colours aggregated nodes.
+  HIER = (g.meta && Array.isArray(g.meta.ranks) && g.meta.ranks.length) ? g.meta.ranks : RANKS;
+  BASE_RANK = HIER[0];
+  GROUP_FIELD = (g.meta && g.meta.ranks) ? (g.meta.color_by || HIER[HIER.length-1]) : "phylum_group";
   const q=getParams();
-  layerRank = (q.get("layer") && RANKS.includes(q.get("layer"))) ? q.get("layer") : "species";
-  const present=RANKS.filter(r=> r==="species" || (g.nodes||[]).some(n=>n[r]));
-  if(!present.includes(layerRank)) layerRank="species";
+  layerRank = (q.get("layer") && HIER.includes(q.get("layer"))) ? q.get("layer") : BASE_RANK;
+  const present=HIER.filter(r=> r===BASE_RANK || (g.nodes||[]).some(n=>n[r]));
+  if(!present.includes(layerRank)) layerRank=BASE_RANK;
   $("#layerseg").innerHTML=present.map(r=>
-    `<button data-r="${r}" class="${r===layerRank?'on':''}" title="${r==='species'?'species (full network)':r+'-level functional layer'}">${r==='species'?'species':r}</button>`).join("");
+    `<button data-r="${r}" class="${r===layerRank?'on':''}" title="${r===BASE_RANK?r+' (full network)':r+'-level functional layer'}">${r}</button>`).join("");
   $("#layersec").style.display = present.length>1 ? "" : "none";
-  load(layerRank==="species" ? g : funnetLayer(g, layerRank));
+  load(layerRank===BASE_RANK ? g : funnetLayer(g, layerRank));
 }
-function applyLayer(){ load(layerRank==="species" ? baseGraph : funnetLayer(baseGraph, layerRank)); }
+function applyLayer(){ load(layerRank===BASE_RANK ? baseGraph : funnetLayer(baseGraph, layerRank)); }
 // Collapse the species graph to `rank`: one node per taxon at its members'
 // layout centroid; edges are between-taxa links (weight = #species-edges,
 // ecorr = mean). Colours/positions stay consistent with the full network.
@@ -447,7 +457,9 @@ function taxonEnrichment(g, memberList, themes){
     "phylum_group","gtdb","gtdb_classification","id","label","color","name","longname","members","x","y","vx","vy","i",
     // metrics / structural ids are not functional annotations:
     "community","module","degree","betweenness","closeness","clustering","strength","modular_degree",
-    "modular_betweenness","atc","atc_last","abundance","avg_abundance","node_size","found","annotated"]);
+    "modular_betweenness","atc","atc_last","abundance","avg_abundance","node_size","found","annotated",
+    // the declared hierarchy ranks — enriching a taxon for its own hierarchy is circular:
+    ...HIER, ...(g.meta&&g.meta.ranks?g.meta.ranks:[])]);
   const miss=v=>v==null||v===""||["NA","Unclassified","unclassified","unknown","Unknown"].includes(String(v));
   const keys=new Set(); g.nodes.forEach(n=>Object.keys(n).forEach(k=>keys.add(k)));
   const fields=[];
@@ -501,10 +513,10 @@ function funnetLayer(g, rank){
   const enr=taxonEnrichment(g, memberList, themes);
   const nodes=themes.map((t,j)=>{
     const ms=memberList[t]; const pc={};
-    ms.forEach(x=>{const p=x.phylum_group||x.phylum||"NA"; pc[p]=(pc[p]||0)+1;});
+    ms.forEach(x=>{const p=x[GROUP_FIELD]||"NA"; pc[p]=(pc[p]||0)+1;});
     const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0];
     const list=enr[t], e=list&&list[0];
-    const nd={ id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t, members:ms.length,
+    const nd={ id:t, label:t, [GROUP_FIELD]:dom, [rank]:t, members:ms.length,
              x:(coords[j][0]-minx)/spanx*S - S/2, y:(coords[j][1]-miny)/spany*S - S/2 };
     if(e){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn;
       nd.enr_score=-Math.log10(e.q);
@@ -548,7 +560,7 @@ function funnetLayer(g, rank){
     return { source:themes[a], target:themes[b], ecorr:w, weight:w, score:1 }; });
   return { meta:{ title:`${g.meta?.title||"network"} — ${rank} functional layer (FunNet)`,
       source:`${m} ${rank}-level taxa${dropped?` (top by size; ${dropped} rare/singleton dropped)`:""} · propagation-proximity (${tp.iterations} steps) · MDS layout · edge = Gaussian affinity`,
-      directed:false, color_by:"phylum_group", trait_ref },
+      directed:false, color_by:GROUP_FIELD, ranks:HIER, trait_ref },
     color_groups:g.color_groups, color_map:g.color_map, nodes, edges };
 }
 
@@ -564,7 +576,7 @@ function getParams(){
 }
 function buildParams(){
   const p=new URLSearchParams(), set=(k,v)=>{ if(v!==""&&v!=null) p.set(k,v); };
-  if(layerRank&&layerRank!=="species") set("layer",layerRank);
+  if(layerRank&&layerRank!==BASE_RANK) set("layer",layerRank);
   if(colorField&&colorField!==(G&&G.meta&&G.meta.color_by)) set("colorby",colorField);
   if(sizeBy&&sizeBy!=="degree") set("sizeby",sizeBy);
   if(currentLayout) set("layout",currentLayout);
@@ -604,7 +616,7 @@ function persist(){
 }
 function resetState(){
   try{ localStorage.removeItem("xsnet:q:"+stateKey);
-    for(const r of RANKS) localStorage.removeItem("xsnet:pos:"+stateKey+":"+r);
+    for(const r of HIER) localStorage.removeItem("xsnet:pos:"+stateKey+":"+r);
   }catch(e){}
   const g=new URLSearchParams(location.search).get("graph");
   location.href=location.pathname+(g?("?graph="+encodeURIComponent(g)):"");
@@ -789,7 +801,7 @@ function recomputeAtc(){
 function setupSizeBy(preserve){
   const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null),
         hasEnr=nodes.some(n=>n.enr_score>0);
-  const sizeOpts=[["degree", layerRank!=="species"?"functional degree":"degree"]];
+  const sizeOpts=[["degree", layerRank!==BASE_RANK?"functional degree":"degree"]];
   if(hasMembers) sizeOpts.push(["members","taxon size (# species)"]);
   if(hasEnr) sizeOpts.push(["enr_score","enrichment (−log q)"]);
   if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
@@ -832,7 +844,7 @@ function load(g){
   selected=new Set(); focus=null;   // node indices are graph-specific — reset on (re)load
   $("#modq").textContent=""; $("#modlist").innerHTML=""; $("#modhint").style.display="";
   // on a functional layer, Louvain reveals functional *guilds* of taxa — say so.
-  const onLayer = layerRank && layerRank!=="species";
+  const onLayer = layerRank && layerRank!==BASE_RANK;
   $("#modtitle").textContent = onLayer ? "Functional guilds" : "Modularity";
   $("#moddetect").textContent = onLayer ? "Detect guilds (Louvain)" : "Detect modules (Louvain)";
   $("#modhint").textContent = onLayer
@@ -1032,7 +1044,7 @@ const TRAIT_FIELDS=["butyrate","inflammation","transit","oralisation","oral_gut_
 // traits, ENGINE = validated ATC) vs COMPUTED live on the visible subgraph.
 function drawStats(){
   const m=G.meta||{}, s=graphStats();
-  const onLayer=layerRank && layerRank!=="species", spectral=m.k!=null && !onLayer;
+  const onLayer=layerRank && layerRank!==BASE_RANK, spectral=m.k!=null && !onLayer;
   const hasAtc=nodes.some(n=>n.atc!=null);
   const pill=(t,c)=>`<span class="pill ${c||'src'}">${t}</span>`;
   const gh=t=>`<div class="gh">${t}</div>`;
@@ -1269,7 +1281,7 @@ function taxColor(pg){
   if(pg==="—"||pg==="NA"||pg==="Unclassified") return "#c9ced6";
   let h=0; for(let i=0;i<pg.length;i++) h=(h*31+pg.charCodeAt(i))>>>0; return TAXPAL[h%TAXPAL.length];
 }
-function taxonOf(nd){ return nd.phylum_group||nd.phylum||"—"; }
+function taxonOf(nd){ return nd[GROUP_FIELD]||nd.phylum||"—"; }
 
 // ---------- module enrichment (Fisher over-representation + Benjamini-Hochberg) ----------
 function logGamma(x){
@@ -1363,7 +1375,7 @@ function detectModules(){
   for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b);
     if(map[a]===map[b]) sumIn[rank.get(map[a])]+=2*ew(e); }
   let Q=0; for(let c=1;c<=nC;c++) Q+=sumIn[c]/m2 - (sumTot[c]/m2)**2;
-  const guildMode = layerRank && layerRank!=="species";
+  const guildMode = layerRank && layerRank!==BASE_RANK;
   $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} ${guildMode?"guilds":"modules"}${onFiltered?" · filtered view":""}`;
   $("#modhint").style.display="none";
   document.querySelector("[data-sec=modules]")?.classList.remove("collapsed");  // reveal results
@@ -1375,7 +1387,7 @@ function detectModules(){
   const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
   const enr = $("#modenrich").checked ? computeEnrichment() : {};
   const fsig = guildTraitSignatures(byMod);   // functional signature per guild (layer only)
-  const isGuild = layerRank && layerRank!=="species";
+  const isGuild = layerRank && layerRank!==BASE_RANK;
   const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
     const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
@@ -1485,7 +1497,7 @@ function render(){
   // Label taxa on the functional layer. Anonymous dots aren't useful, but at fine
   // ranks (100s of taxa) labelling everything is a mess — so always label the
   // bigger nodes, label all when few taxa, and reveal the rest as you zoom in.
-  const isLayer = layerRank!=="species";
+  const isLayer = layerRank!==BASE_RANK;
   const labelAll = isLayer && (nodes.length<=60 || view.k>=1.5);
   // emphasis: a shortest path (2 selected) > pinned selection ego > hover.
   const pathOn = pathNodes.length>1;
