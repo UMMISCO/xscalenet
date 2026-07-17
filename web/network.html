@@ -1644,23 +1644,57 @@ CV.addEventListener("pointermove",ev=>{
   } else tip.style.display="none";
 });
 function row(k,v){ return v==null||v===""?"":`<div class="r"><span>${k}</span><b>${v}</b></div>`; }
+// Host/diet/fungal phyla that are usually contamination in a gut-MGS network.
+const CONTAM_PHYLA=new Set(["Chordata","Ascomycota","Basidiomycota","Mucoromycota","Zoopagomycota",
+  "Heterokonta","Apicomplexa","Evosea","Streptophyta","Chlorophyta","Arthropoda","Nematoda"]);
+function isContaminant(n){ return n.species==="Homo sapiens" || n.superkingdom==="Eukaryota"
+  || CONTAM_PHYLA.has(n.phylum) || (layerRank && CONTAM_PHYLA.has(n[layerRank])); }
+// Node/Taxon inspector as a grouped provenance card, matching the Network panel:
+// Taxonomy [GTDB], Function [MSP], Centrality [computed], ATC [engine/recomputed],
+// with an amber "contaminant?" / "inferred" flag on uncertain facts.
 function inspect(i, pinned){
-  const n=nodes[i], box=$("#inspect");
-  box.innerHTML=`<h2>${n.members!=null?"Taxon":"Node"} — ${n.id}${pinned?' <span style="color:var(--accent)">◉</span>':''}</h2>`+
-    (n.label&&n.members==null?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
-    (pinned?nodeActions(i):"")+
-    (n.members!=null?row2("species (members)",n.members):"")+
-    (n.enr_list?.length?`<div class="kv" style="align-items:flex-start"><span class="k">enriched</span>`+
-      `<div style="text-align:right">${n.enr_list.map(e=>
-        `<div title="Fisher over-representation, BH-adjusted"><b>▲ ${e.f}=${e.v}</b> <span class="k">${e.a}/${e.nn} · q=${fmtQ(e.q)}</span></div>`).join("")}</div></div>`:"")+
-    row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
-    row2(n.members!=null?"between-taxa degree":"degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
-    (prop.step!=null && runAtcAt(i)!=null?row2(`ATC @step ${prop.step} (of ${(+n.atc).toFixed(4)})`, runAtcAt(i).toFixed(4)):
-      (n.atc!=null?row2("ATC (dist·coin)",(+n.atc).toFixed(4)):""))+
-    (n.atc_last!=null?row2("ATC (last config)",(+n.atc_last).toFixed(4)):"")+
-    (prop.step!=null?row2(`theme mix @step ${prop.step}`, themeMix(i)):"")+
-    ["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0).map(k=>row2(k,"✓")).join("")+
-    (pinned?neighborList(i):"");
+  const n=nodes[i], box=$("#inspect"), isTaxon=n.members!=null;
+  const pill=(t,c)=>`<span class="pill ${c||'src'}">${t}</span>`;
+  const gh=(t,p)=>`<div class="gh">${t}${p||""}</div>`;
+  const row=(k,v,p)=> (v==null||v==="")?"":`<div class="prow"><span class="pk">${k}</span><span class="pv">${v}${p||""}</span></div>`;
+  const U=t=>`<span class="u">${t}</span>`;
+  const contam=isContaminant(n);
+  let h=`<h2>${isTaxon?"Taxon":"Node"} — ${n.id}${pinned?' <span style="color:var(--accent)">◉</span>':''}${contam?pill("contaminant?","warn"):""}</h2>`;
+  if(n.label && !isTaxon && n.label!==n.id) h+=`<div style="margin:-2px 0 8px;font-style:italic;color:var(--muted)">${n.label}</div>`;
+  if(pinned) h+=nodeActions(i);
+  // Enrichment (functional layer taxa)
+  if(n.enr_list?.length){ h+=gh("Enrichment", pill("Fisher·BH","calc"))+
+    n.enr_list.map(e=>row(`▲ ${e.f}`, `${e.v==='1'?'+':e.v==='-1'?'−':e.v} ${U(e.a+'/'+e.nn+' · q='+fmtQ(e.q))}`)).join(""); }
+  // Taxonomy [GTDB]; uncertain assignments (sp. / unclassified) get an amber pill
+  const trow=k=>{ const v=n[k]; if(v==null||v==="") return "";
+    return row(k, v, /(\bsp\.|unclassified|UBA|CAG-)/i.test(String(v))?pill("inferred","warn"):""); };
+  h+=gh("Taxonomy", pill("GTDB"))+
+    (isTaxon?row("species (members)", n.members):"")+
+    trow("superkingdom")+trow("phylum")+trow("class")+trow("order")+trow("family")+trow("genus")+trow("species");
+  // Function [MSP] — non-baseline traits
+  const traits=["butyrate","inflammation","transit","oralisation"].filter(k=>n[k]!=null&&+n[k]!==0);
+  if(traits.length) h+=gh("Function", pill("MSP"))+
+    traits.map(k=>row(k, +n[k]>0?"+":"−")).join("");
+  // Centrality [computed]
+  const cz=(v,f)=>v==null?null:f(+v);
+  h+=gh("Centrality", pill("computed","calc"))+
+    row(isTaxon?"functional degree":"degree", VIS.deg[i])+
+    row("betweenness", cz(n.betweenness,x=>x.toExponential(2)))+
+    row("closeness", cz(n.closeness,x=>x.toFixed(3)))+
+    row("clustering", cz(n.clustering,x=>x.toFixed(3)))+
+    row("community", n.community);
+  // ATC [engine / recomputed / inferred on contaminants]
+  if(n.atc!=null || (prop.step!=null && runAtcAt(i)!=null)){
+    const ap=atcRecomputed?pill("recomputed","calc"):(contam?pill("inferred","warn"):pill("engine"));
+    h+=gh("ATC", ap)+
+      (prop.step!=null && runAtcAt(i)!=null
+        ? row(`@step ${prop.step}`, `${runAtcAt(i).toFixed(4)} ${U('/ '+(+n.atc).toFixed(4))}`)
+        : row("dist·coinertia", (+n.atc).toFixed(4)))+
+      (n.atc_last!=null?row("last config", (+n.atc_last).toFixed(4)):"")+
+      (prop.step!=null?row(`theme mix @${prop.step}`, themeMix(i)):"");
+  }
+  if(pinned) h+=neighborList(i);
+  box.innerHTML=h;
 }
 
 // ---------- selection + node actions ----------
