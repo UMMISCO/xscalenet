@@ -512,6 +512,20 @@ function funnetLayer(g, rank){
     else nd.enr_score=0;
     return nd;
   });
+  // Functional-trait reference for guild signatures: per-taxon positive counts of
+  // each trait among member species, + global totals (Fisher over-rep per guild).
+  const TC=[];
+  for(const f of ["butyrate","inflammation","transit","oralisation"]){
+    const vs=new Set(); g.nodes.forEach(nd=>{ const v=nd[f]; if(v!=null && v!=="" && v!=="0" && !atcMissing(v)) vs.add(String(v)); });
+    for(const v of vs) TC.push({field:f, val:v});
+  }
+  let trait_ref=null;
+  if(TC.length){
+    const Ntot=g.nodes.length, Kc=TC.map(tc=>{ let c=0; for(const nd of g.nodes) if(String(nd[tc.field])===tc.val) c++; return c; });
+    nodes.forEach(nd=>{ const ms=memberList[nd.id];
+      nd.tpos=TC.map(tc=>{ let c=0; for(const s of ms) if(String(s[tc.field])===tc.val) c++; return c; }); });
+    trait_ref={N:Ntot, cats:TC, K:Kc};
+  }
   // MDS can stack taxa with near-identical profiles; gently push coincident nodes
   // apart (preserves the macro layout, makes labels readable).
   for(let it=0; it<80; it++){ let moved=false;
@@ -534,7 +548,7 @@ function funnetLayer(g, rank){
     return { source:themes[a], target:themes[b], ecorr:w, weight:w, score:1 }; });
   return { meta:{ title:`${g.meta?.title||"network"} — ${rank} functional layer (FunNet)`,
       source:`${m} ${rank}-level taxa${dropped?` (top by size; ${dropped} rare/singleton dropped)`:""} · propagation-proximity (${tp.iterations} steps) · MDS layout · edge = Gaussian affinity`,
-      directed:false, color_by:"phylum_group" },
+      directed:false, color_by:"phylum_group", trait_ref },
     color_groups:g.color_groups, color_map:g.color_map, nodes, edges };
 }
 
@@ -1311,6 +1325,21 @@ function computeEnrichment(){
   return best;
 }
 function fmtQ(q){ return q<1e-3 ? q.toExponential(0) : q.toFixed(3); }
+// Functional signature per guild (functional layer only): over-representation of a
+// trait among the guild's MEMBER SPECIES (aggregated from each taxon's tpos counts)
+// vs all species, Fisher + BH. Returns {mid:{field,val,a,nn,q}}.
+function guildTraitSignatures(byMod){
+  const tr=G.meta?.trait_ref; if(!tr) return {};
+  const tests=[];
+  for(const mid in byMod){ const ms=byMod[mid]; let nn=0; ms.forEach(nd=>nn+=nd.members||0);
+    tr.cats.forEach((tc,ci)=>{ let a=0; ms.forEach(nd=>{ a+=(nd.tpos?nd.tpos[ci]:0)|0; });
+      if(a<2) return; tests.push({mid,field:tc.field,val:tc.val,a,nn,q:1,p:fisherOver(a,tr.N,tr.K[ci],nn)}); }); }
+  if(!tests.length) return {};
+  tests.sort((x,y)=>x.p-y.p); const M=tests.length; let mq=1;
+  for(let i=M-1;i>=0;i--){ tests[i].q=mq=Math.min(mq, tests[i].p*M/(i+1)); }
+  const best={}; for(const t of tests){ if(t.q<0.05 && (!best[t.mid]||t.q<best[t.mid].q)) best[t.mid]=t; }
+  return best;
+}
 
 function detectModules(){
   const weighted=$("#modweight").checked, onFiltered=$("#modfiltered").checked;
@@ -1334,8 +1363,10 @@ function detectModules(){
   for(const e of es){ if(e.a===e.b) continue; const a=loc.get(e.a),b=loc.get(e.b);
     if(map[a]===map[b]) sumIn[rank.get(map[a])]+=2*ew(e); }
   let Q=0; for(let c=1;c<=nC;c++) Q+=sumIn[c]/m2 - (sumTot[c]/m2)**2;
-  $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} modules${onFiltered?" · filtered view":""}`;
+  const guildMode = layerRank && layerRank!=="species";
+  $("#modq").innerHTML=`Q = <b>${Q.toFixed(3)}</b> · ${nC} ${guildMode?"guilds":"modules"}${onFiltered?" · filtered view":""}`;
   $("#modhint").style.display="none";
+  document.querySelector("[data-sec=modules]")?.classList.remove("collapsed");  // reveal results
   if(!$("#colorby").querySelector('option[value=module]')){
     const o=document.createElement("option"); o.value="module"; o.textContent="module (Louvain)"; $("#colorby").appendChild(o); }
   colorField="module"; $("#colorby").value="module"; buildColors(); apply();
@@ -1343,6 +1374,8 @@ function detectModules(){
   const hasTax=nodes.some(nd=>nd.phylum_group||nd.phylum);
   const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
   const enr = $("#modenrich").checked ? computeEnrichment() : {};
+  const fsig = guildTraitSignatures(byMod);   // functional signature per guild (layer only)
+  const isGuild = layerRank && layerRank!=="species";
   const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
     const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
@@ -1352,10 +1385,12 @@ function detectModules(){
         `<span style="flex:${c};background:${taxColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
     const e=enr[mid];
     const sig = (e&&e.q<0.05) ? `<div class="modsig" title="Fisher over-representation, BH q=${e.q.toExponential(2)}">▲ ${e.val} <span>· ${e.field} · q=${fmtQ(e.q)}</span></div>` : "";
+    const f=fsig[mid];
+    const fsigHtml = f ? `<div class="modsig" style="color:var(--accent)" title="functional trait over-representation among member species (Fisher+BH)">▲ ${f.field}=${f.val==='1'?'+':f.val==='-1'?'−':f.val} <span>· ${f.a}/${f.nn} species · q=${fmtQ(f.q)}</span></div>` : "";
     return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid}">`+
       `<div class="modhead"><span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
-      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}${sig}</div>`;
-  }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more modules</div>`:"");
+      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}${fsigHtml}${sig}</div>`;
+  }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more ${isGuild?"guilds":"modules"}</div>`:"");
 }
 function focusModule(mid){
   if(focusKey==="mod:"+mid){ clearFocus(); return; }   // click the focused module again → show all
