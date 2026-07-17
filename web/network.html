@@ -1373,7 +1373,9 @@ function enrichFields(){
     const vals=new Map();
     for(const n of nodes){ let v=n[k]; if(v==null||v==="")continue; v=String(v);
       if(v==="NA"||v==="Unclassified")continue; vals.set(v,(vals.get(v)||0)+1); }
-    if(vals.size<1||vals.size>200) continue;
+    // skip near-unique (id/label-like) columns, but keep high-cardinality
+    // annotations (e.g. 618 flickr tags, GO terms) so they can enrich modules.
+    if(vals.size<1 || vals.size>Math.max(50, nodes.length*0.5)) continue;
     let cats=[...vals.keys()];
     if(cats.length<=2 && cats.every(c=>c==="0"||c==="1")) cats=cats.includes("1")?["1"]:[];
     if(cats.length) out.push({field:k, cats});
