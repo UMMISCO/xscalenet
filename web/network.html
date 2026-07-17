@@ -252,7 +252,7 @@
         <input type="checkbox" id="autoflow"> auto-flow layout on filter</label>
     </div>
 
-    <div class="sec cl collapsed" data-sec="modules" style="order:7">
+    <div class="sec cl collapsed" data-sec="modules" style="order:8">
       <h2><span id="modtitle">Modularity</span> <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="modweight" checked> weight by edge strength</label>
@@ -265,7 +265,7 @@
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec cl collapsed" id="subgsec" data-sec="subgraphs" style="display:none;order:8">
+    <div class="sec cl collapsed" id="subgsec" data-sec="subgraphs" style="display:none;order:9">
       <h2>Spectral subgraphs <span class="hint" id="subgnote"></span></h2>
       <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”.</div>
       <button class="btn" id="subgcov" style="width:100%;margin-top:9px;justify-content:center">Overlap heatmap (coverage)</button>
@@ -280,13 +280,13 @@
       <div class="rec" id="subginfo" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec cl" id="layersec" data-sec="layer" style="display:none;order:5">
+    <div class="sec cl" id="layersec" data-sec="layer" style="display:none;order:6">
       <h2>Taxonomic layer</h2>
       <div class="seg" id="layerseg" style="flex-wrap:wrap"></div>
       <div class="hint" id="layernote" style="margin-top:7px">FunNet functional layer: taxon membership is propagated over the species network; taxa are linked by self-tuning Gaussian proximity of their propagated profiles and laid out by classic MDS (proximity ≈ functional, not just direct contacts).</div>
     </div>
 
-    <div class="sec cl" id="propsec" data-sec="atc" style="display:none;order:6">
+    <div class="sec cl" id="propsec" data-sec="atc" style="display:none;order:7">
       <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -325,7 +325,7 @@
         <input type="range" id="md" min="0" max="10" step="1" value="0"></label>
     </div>
 
-    <div class="sec cl" data-sec="scalefree" style="order:9">
+    <div class="sec cl" data-sec="scalefree" style="order:5">
       <h2>Scale-free topology <span class="hint" id="sfnote"></span></h2>
       <canvas id="sf"></canvas>
       <div class="verdict" id="verdict"></div>
