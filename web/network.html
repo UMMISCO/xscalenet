@@ -415,6 +415,39 @@ function aggregate(g, rank){
     color_groups:g.color_groups, color_map:g.color_map, nodes, edges };
 }
 
+// Functional-trait enrichment per taxon (Fisher over-representation + BH), the
+// integranet/FunNet enrichment step. Only NON-taxonomic categorical fields are
+// tested (e.g. butyrate / inflammation / oralisation) — enriching a taxon for
+// its own finer taxonomy would be circular. Returns {taxon:{field,val,a,K,nn,q}}.
+function taxonEnrichment(g, memberList, themes){
+  const BLOCK=new Set(["species","genus","family","order","class","phylum","superkingdom",
+    "phylum_group","gtdb","gtdb_classification","id","label","color","name","longname","members","x","y","vx","vy","i",
+    // metrics / structural ids are not functional annotations:
+    "community","module","degree","betweenness","closeness","clustering","strength","modular_degree",
+    "modular_betweenness","atc","atc_last","abundance","avg_abundance","node_size","found","annotated"]);
+  const miss=v=>v==null||v===""||["NA","Unclassified","unclassified","unknown","Unknown"].includes(String(v));
+  const keys=new Set(); g.nodes.forEach(n=>Object.keys(n).forEach(k=>keys.add(k)));
+  const fields=[];
+  for(const k of keys){ if(BLOCK.has(k)) continue;
+    const vals=new Map();
+    for(const n of g.nodes){ let v=n[k]; if(miss(v)) continue; v=String(v); vals.set(v,(vals.get(v)||0)+1); }
+    if(vals.size<1||vals.size>50) continue;                       // skip continuous / id-like
+    fields.push({field:k, cats:[...vals.keys()].filter(c=>c!=="0"&&c!=="-")}); // 0 / "-" = baseline
+  }
+  const N=g.nodes.length, Kof={};
+  for(const {field,cats} of fields){ Kof[field]={}; cats.forEach(c=>Kof[field][c]=0);
+    for(const n of g.nodes){ const v=String(n[field]); if(Kof[field][v]!=null) Kof[field][v]++; } }
+  const tests=[];
+  for(const t of themes){ const ms=memberList[t], nn=ms.length;
+    for(const {field,cats} of fields){ for(const c of cats){ let a=0; for(const n of ms) if(String(n[field])===c) a++;
+      if(a<2) continue; tests.push({t,field,val:c,a,K:Kof[field][c],nn,p:fisherOver(a,N,Kof[field][c],nn)}); } } }
+  if(!tests.length) return {};
+  tests.sort((x,y)=>x.p-y.p); const M=tests.length; let minq=1;
+  for(let i=M-1;i>=0;i--){ tests[i].q=minq=Math.min(minq, tests[i].p*M/(i+1)); }
+  const best={}; for(const tt of tests){ if(!best[tt.t]||tt.q<best[tt.t].q) best[tt.t]=tt; }
+  return best;
+}
+
 // The FunNet **functional layer** for a taxonomic rank: propagate taxon
 // membership over the species network, link taxa by self-tuning Gaussian
 // proximity between their propagated profiles, and lay them out by classic MDS
@@ -434,13 +467,26 @@ function funnetLayer(g, rank){
   let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
   coords.forEach(c=>{ minx=Math.min(minx,c[0]);maxx=Math.max(maxx,c[0]);miny=Math.min(miny,c[1]);maxy=Math.max(maxy,c[1]); });
   const spanx=(maxx-minx)||1, spany=(maxy-miny)||1, S=900;
+  const enr=taxonEnrichment(g, memberList, themes);
   const nodes=themes.map((t,j)=>{
     const ms=memberList[t]; const pc={};
     ms.forEach(x=>{const p=x.phylum_group||x.phylum||"NA"; pc[p]=(pc[p]||0)+1;});
     const dom=Object.keys(pc).sort((a,b)=>pc[b]-pc[a])[0];
-    return { id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t, members:ms.length,
+    const e=enr[t];
+    const nd={ id:t, label:t, phylum:ms[0].phylum, phylum_group:dom, [rank]:t, members:ms.length,
              x:(coords[j][0]-minx)/spanx*S - S/2, y:(coords[j][1]-miny)/spany*S - S/2 };
+    if(e && e.q<0.05){ nd.enrich=`${e.field}=${e.val}`; nd.enrich_q=e.q; nd.enrich_a=e.a; nd.enrich_nn=e.nn; }
+    return nd;
   });
+  // MDS can stack taxa with near-identical profiles; gently push coincident nodes
+  // apart (preserves the macro layout, makes labels readable).
+  for(let it=0; it<80; it++){ let moved=false;
+    for(let a=0;a<nodes.length;a++) for(let b=a+1;b<nodes.length;b++){
+      let dx=nodes[b].x-nodes[a].x, dy=nodes[b].y-nodes[a].y, d=Math.hypot(dx,dy); const MIN=42;
+      if(d<MIN){ if(d<1e-6){ dx=Math.cos(a*1.7+b); dy=Math.sin(a*1.7+b); d=1; }
+        const p=(MIN-d)/2/d; nodes[a].x-=dx*p; nodes[a].y-=dy*p; nodes[b].x+=dx*p; nodes[b].y+=dy*p; moved=true; } }
+    if(!moved) break;
+  }
   // Sparsify the dense proximity matrix: keep each taxon's top-K strongest links
   // (union), so it stays readable but nothing is isolated.
   const K=3, keep=new Map();
@@ -1320,6 +1366,8 @@ function render(){
   persist();   // debounced; captures pan/zoom, size-by, sim/drag positions
   CTX.setTransform(dpr,0,0,dpr,0,0); CTX.clearRect(0,0,stageW(),stageH());
   CTX.save(); CTX.translate(view.x,view.y); CTX.scale(view.k,view.k);
+  // label taxa on the (small) functional layer — anonymous dots aren't useful there.
+  const showLabels = layerRank!=="species" && nodes.length<=60;
   // emphasis: a shortest path (2 selected) > pinned selection ego > hover.
   const pathOn = pathNodes.length>1;
   const nbr = pathOn ? new Set(pathNodes)
@@ -1363,6 +1411,12 @@ function render(){
     else if(pathOn && nbr.has(n.i)){ CTX.lineWidth=1.8/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else if(n.i===hot){ CTX.lineWidth=2/view.k; CTX.strokeStyle=COL.accent; CTX.stroke(); }
     else { CTX.lineWidth=0.7/view.k; CTX.strokeStyle=COL.panel; CTX.stroke(); }
+    // labels on the (small) functional layer: taxon name + enrichment signature
+    if(showLabels){ const fs=11/view.k; CTX.font=`${fs}px -apple-system,BlinkMacSystemFont,sans-serif`;
+      CTX.fillStyle=COL.ink; CTX.textAlign="center"; CTX.textBaseline="bottom";
+      CTX.fillText(n.label||n.id, n.x, n.y-r-2/view.k);
+      if(n.enrich){ CTX.fillStyle=COL.muted; CTX.textBaseline="top";
+        CTX.fillText(`▲ ${n.enrich} · q=${fmtQ(n.enrich_q)}`, n.x, n.y+r+2/view.k); } }
   }
   CTX.globalAlpha=1; CTX.restore();
 }
@@ -1498,6 +1552,7 @@ function inspect(i, pinned){
     (n.label&&n.members==null?`<div style="margin-bottom:6px;font-style:italic">${n.label}</div>`:"")+
     (pinned?nodeActions(i):"")+
     (n.members!=null?row2("species (members)",n.members):"")+
+    (n.enrich?`<div class="kv"><span class="k">enriched</span><b title="Fisher over-representation, BH-adjusted">▲ ${n.enrich} · ${n.enrich_a}/${n.enrich_nn} · q=${fmtQ(n.enrich_q)}</b></div>`:"")+
     row2("phylum",n.phylum)+row2("class",n.class)+row2("order",n.order)+row2("family",n.family)+row2("genus",n.genus)+
     row2(n.members!=null?"between-taxa degree":"degree",VIS.deg[i])+ (n.abundance!=null?row2("avg abundance",(+n.abundance).toExponential(3)):"")+
     (prop.step!=null && runAtcAt(i)!=null?row2(`ATC @step ${prop.step} (of ${(+n.atc).toFixed(4)})`, runAtcAt(i).toFixed(4)):
