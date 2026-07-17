@@ -1445,26 +1445,29 @@ function detectModules(){
   if(!$("#colorby").querySelector('option[value=module]')){
     const o=document.createElement("option"); o.value="module"; o.textContent="module (Louvain)"; $("#colorby").appendChild(o); }
   colorField="module"; $("#colorby").value="module"; buildColors(); apply();
-  // module list with taxonomy composition (cross modules × taxonomy) + enrichment
-  const hasTax=nodes.some(nd=>nd.phylum_group||nd.phylum);
+  // module list: how the annotation "wraps" each module — dominant group +
+  // composition bar (any annotation: taxonomy, category, tag) + Fisher enrichment.
   const byMod={}; nodes.forEach(nd=>{ if(nd.module) (byMod[nd.module]=byMod[nd.module]||[]).push(nd); });
+  const hasComp=nodes.some(nd=>{ const t=taxonOf(nd); return t && t!=="—"; });
+  const compColor=p=>(G.color_map&&G.color_map[p])||taxColor(p);
+  const groupName=(G.meta&&G.meta.color_by)||"group";
   const enr = $("#modenrich").checked ? computeEnrichment() : {};
-  const fsig = guildTraitSignatures(byMod);   // functional signature per guild (layer only)
+  const fsig = guildTraitSignatures(byMod);   // functional signature per guild (traits only)
   const isGuild = !!(G.meta && G.meta.trait_ref);
   const mids=order.map((_,i)=>"M"+(i+1)).slice(0,20);
   $("#modlist").innerHTML=mids.map(mid=>{ const ms=byMod[mid]||[];
     const pc={}; ms.forEach(nd=>{ const p=taxonOf(nd); pc[p]=(pc[p]||0)+1; });
     const comp=Object.entries(pc).sort((a,b)=>b[1]-a[1]);
     const dom=comp[0]||["—",0], homog=ms.length?Math.round(100*dom[1]/ms.length):0;
-    const bar=hasTax? `<div class="modbar">${comp.map(([p,c])=>
-        `<span style="flex:${c};background:${taxColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
+    const bar=hasComp? `<div class="modbar">${comp.map(([p,c])=>
+        `<span style="flex:${c};background:${compColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
     const e=enr[mid];
     const sig = (e&&e.q<0.05) ? `<div class="modsig" title="Fisher over-representation, BH q=${e.q.toExponential(2)}">▲ ${e.val} <span>· ${e.field} · q=${fmtQ(e.q)}</span></div>` : "";
     const f=fsig[mid];
     const fsigHtml = f ? `<div class="modsig" style="color:var(--accent)" title="functional trait over-representation among member species (Fisher+BH)">▲ ${f.field}=${f.val==='1'?'+':f.val==='-1'?'−':f.val} <span>· ${f.a}/${f.nn} species · q=${fmtQ(f.q)}</span></div>` : "";
-    return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid}">`+
+    return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid} · dominant ${groupName}: ${dom[0]} (${homog}%)">`+
       `<div class="modhead"><span class="dot" style="background:${gcolor[mid]||'#888'}"></span>`+
-      `<span class="nm">${mid}${hasTax?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}${fsigHtml}${sig}</div>`;
+      `<span class="nm">${mid}${hasComp?` <i>${dom[0]} ${homog}%</i>`:""}</span><b>${ms.length}</b></div>${bar}${fsigHtml}${sig}</div>`;
   }).join("")+(order.length>20?`<div class="hint">+${order.length-20} more ${isGuild?"guilds":"modules"}</div>`:"");
 }
 function focusModule(mid){
