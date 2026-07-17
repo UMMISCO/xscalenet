@@ -253,6 +253,11 @@
     <div class="sec" id="propsec" style="display:none">
       <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
+      <div class="trow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <button class="btn primary" id="atcrecompute" style="flex:1;justify-content:center" title="Recompute ATC on the currently visible network — after filtering / excluding contaminants (e.g. colour by species and toggle off Homo sapiens)">↻ Recompute on current view</button>
+        <label class="lh" style="display:flex;align-items:center;gap:5px;white-space:nowrap" title="Weight propagation by |ecorr| instead of 1/0"><input type="checkbox" id="atcweight"> weighted</label>
+      </div>
+      <div class="hint" id="atcrecinfo" style="margin:-2px 0 8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px">
         <button class="btn" id="propplay" style="padding:5px 9px">▶</button>
         <input type="range" id="propscrub" min="0" max="0" value="0" step="1" style="flex:1">
@@ -322,6 +327,7 @@ const SF=$("#sf"), SFX=SF.getContext("2d");
 let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
 let view={x:0,y:0,k:1}, dpr=1, hot=-1, hotEdge=null, dragging=null, panning=null, offGroups=new Set();
 let stateKey="net", restoring=true, saveTimer=0;   // persist analysis across refreshes
+let atcRecomputed=false;   // ATC recomputed on the finalized topology (re-runs on reload)
 let selected=new Set();   // pinned node selection (indices into `nodes`)
 let focus=null;           // when set, restrict the view to these node indices (ego-network)
 let focusLabel="", focusKey="";   // human label + identity of the current focus
@@ -441,6 +447,8 @@ function buildParams(){
   if(pathMode&&pathMode!=="hops") set("pathmode",pathMode);
   if(selected.size) set("select",[...selected].map(i=>nodes[i]&&nodes[i].id).filter(Boolean).join(","));
   if(focusKey==="ego") set("focus","1");
+  if(atcRecomputed) set("atcrec","1");
+  if($("#atcweight")&&$("#atcweight").checked) set("atcw","1");
   set("view",[view.x,view.y,view.k].map(v=>+(+v).toFixed(2)).join(","));
   return p;
 }
@@ -465,10 +473,139 @@ function resetState(){
   location.href=location.pathname+(g?("?graph="+encodeURIComponent(g)):"");
 }
 
+// ---------- ATC (Annotation Transcriptional Centrality) — faithful JS port of
+// src/atc.rs, validated against the R 10-node reference to ~1e-8. Lets us
+// recompute ATC on a *finalized* topology (current visible network) in-browser.
+function atcNormCols(t, m){ for(let j=0;j<m;j++){ let s=0; for(let i=0;i<t.length;i++) s+=t[i][j];
+  if(s>0) for(let i=0;i<t.length;i++) t[i][j]/=s; } }
+function atcStd(t, m){ const n=t.length; if(!n) return [];
+  const mean=new Float64Array(m), sd=new Float64Array(m);
+  for(let i=0;i<n;i++) for(let j=0;j<m;j++) mean[j]+=t[i][j];
+  for(let j=0;j<m;j++) mean[j]/=n;
+  for(let i=0;i<n;i++) for(let j=0;j<m;j++){ const d=t[i][j]-mean[j]; sd[j]+=d*d; }
+  for(let j=0;j<m;j++) sd[j]=Math.sqrt(sd[j]/n);
+  const out=new Array(n);
+  for(let i=0;i<n;i++){ const r=new Float64Array(m);
+    for(let j=0;j<m;j++) r[j]= sd[j]>0 ? (t[i][j]-mean[j])/sd[j] : 0; out[i]=r; }
+  return out; }
+function atcRV(xr, yr, m){ const x=atcStd(xr,m), y=atcStd(yr,m), n=x.length;
+  const xy=new Float64Array(m*m), xx=new Float64Array(m*m), yy=new Float64Array(m*m);
+  for(let i=0;i<n;i++){ const X=x[i], Y=y[i];
+    for(let a=0;a<m;a++){ const xa=X[a], ya=Y[a];
+      for(let b=0;b<m;b++){ xy[a*m+b]+=xa*Y[b]; xx[a*m+b]+=xa*X[b]; yy[a*m+b]+=ya*Y[b]; } } }
+  const fro=v=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; return s; };
+  const den=Math.sqrt(fro(xx))*Math.sqrt(fro(yy)); return den===0?0:fro(xy)/den; }
+// n nodes, adj[i]=[[j,w]…], t0 = n×m membership. cfg {selfLoop,thr,maxIter,captureTrace}
+function atcCompute(n, adj, t0, cfg){
+  cfg=Object.assign({selfLoop:true, thr:0.999, maxIter:20, captureTrace:false}, cfg||{});
+  const m=t0[0]?t0[0].length:0;
+  let prev=t0.map(r=>Float64Array.from(r)); atcNormCols(prev,m);
+  const atc=new Float64Array(n), coin=[]; let iters=0; const cfgs=[], dels=[];
+  if(cfg.captureTrace) cfgs.push(prev.map(r=>Array.from(r)));
+  for(let it=0; it<cfg.maxIter; it++){
+    const cur=new Array(n);
+    for(let i=0;i<n;i++){ const row=new Float64Array(m);
+      if(cfg.selfLoop){ const s=prev[i]; for(let j=0;j<m;j++) row[j]+=s[j]; }
+      const a=adj[i]; for(let k=0;k<a.length;k++){ const u=a[k][0], w=a[k][1], s=prev[u];
+        for(let j=0;j<m;j++) row[j]+=w*s[j]; }
+      cur[i]=row; }
+    atcNormCols(cur,m);
+    const rv=atcRV(prev,cur,m), cp=1-rv; const dist=new Float64Array(n);
+    for(let i=0;i<n;i++){ let d=0; for(let j=0;j<m;j++){ const df=cur[i][j]-prev[i][j]; d+=df*df; }
+      dist[i]=Math.sqrt(d); atc[i]+=dist[i]*cp; }
+    if(cfg.captureTrace){ cfgs.push(cur.map(r=>Array.from(r))); dels.push(Array.from(dist)); }
+    coin.push(rv); iters++; prev=cur; if(rv>=cfg.thr) break;
+  }
+  let s=0; for(let i=0;i<n;i++) s+=atc[i]; if(s>0) for(let i=0;i<n;i++) atc[i]/=s;
+  const atcLast=prev.map(r=>{ let t=0; for(let j=0;j<m;j++) t+=r[j]; return t; });
+  return { atc:Array.from(atc), atcLast, coinertia:coin, iterations:iters,
+           configs:cfg.captureTrace?cfgs:null, deltas:cfg.captureTrace?dels:null }; }
+const ATC_MISSING=["NA","Unclassified","unclassified","","unknown","Unknown"];
+const atcMissing=v=>v==null||ATC_MISSING.includes(v);
+
+// Recompute ATC on the FINALIZED topology = the currently visible subgraph
+// (after edge filters, min-degree, legend toggles, ego focus). The annotation
+// propagated is the graph's ATC annotation if set, else the current colour field.
+function recomputeAtc(){
+  if(!trace.length && !colorField){ flash("No annotation to propagate"); return; }
+  const annField=(G.atc_trace&&G.atc_trace.annotation)||colorField;
+  const visN=[...VIS.visN];
+  if(visN.length<2){ flash("Too few visible nodes"); return; }
+  const freq={}; for(const gi of visN){ const v=nodes[gi][annField]; if(!atcMissing(v)) freq[v]=(freq[v]||0)+1; }
+  const themes=Object.keys(freq).sort((a,b)=>freq[b]-freq[a]);
+  if(!themes.length){ flash(`'${annField}' has no usable labels in the view`); return; }
+  const ti={}; themes.forEach((t,j)=>ti[t]=j); const m=themes.length, nn=visN.length;
+  const loc=new Map(); visN.forEach((gi,li)=>loc.set(gi,li));
+  const t0=visN.map(gi=>{ const r=new Array(m).fill(0); const v=nodes[gi][annField]; if(v in ti) r[ti[v]]=1; return r; });
+  const weighted=$("#atcweight").checked;
+  const adj=Array.from({length:nn},()=>[]);
+  for(const e of VIS.edges){ const a=loc.get(e.a), b=loc.get(e.b); if(a==null||b==null||a===b) continue;
+    const w=weighted?(Math.abs(e.ecorr)||1):1; adj[a].push([b,w]); adj[b].push([a,w]); }
+  const res=atcCompute(nn, adj, t0, {selfLoop:true, thr:0.999, maxIter:20, captureTrace:true});
+  // theme colours: reuse the taxonomy palette when propagating the colour field.
+  const tc=themes.map((t,j)=> (G.color_map&&G.color_map[t]) || TAXPAL[j%TAXPAL.length]);
+  // write per-node scores; nodes outside the finalized topology have no ATC.
+  nodes.forEach(nd=>{ delete nd.atc; delete nd.atc_last; });
+  visN.forEach((gi,li)=>{ nodes[gi].atc=res.atc[li]; nodes[gi].atc_last=res.atcLast[li]; });
+  // rebuild the trace over GLOBAL node order (hidden nodes = zero rows) for the player.
+  const zero=()=>new Array(m).fill(0);
+  const steps=res.configs.map((cfg,p)=>{
+    const config=nodes.map(zero); visN.forEach((gi,li)=>config[gi]=Array.from(cfg[li]));
+    let delta=null;
+    if(p>0){ delta=new Array(nodes.length).fill(0); visN.forEach((gi,li)=>delta[gi]=res.deltas[p-1][li]); }
+    return { step:p, coinertia:p===0?null:res.coinertia[p-1], config, delta };
+  });
+  G.atc_trace={ annotation:annField, steps }; G.themes=themes; G.theme_colors=tc;
+  atcRecomputed=true;
+  setupSizeBy(true); setupProp();
+  sizeBy="atc"; $("#sizeby").value="atc";
+  $("#atcrecinfo").innerHTML=`↻ recomputed on <b>${nn}</b> nodes · ${VIS.edges.length} edges · `+
+    `${m} themes (${annField})${weighted?" · weighted":""} · ${res.iterations} steps`;
+  buildColors(); apply(); showInfo();
+  flash(`ATC recomputed on the current topology (${nn} nodes, ${m} themes)`);
+}
+
 // ---------- load ----------
+function setupSizeBy(preserve){
+  const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null);
+  const sizeOpts=[["degree","degree"]];
+  if(hasMembers) sizeOpts.push(["members","taxon size (# species)"]);
+  if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
+  const keep=sizeBy;
+  $("#sizeby").innerHTML=sizeOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+  sizeBy = (preserve && sizeOpts.some(o=>o[0]===keep)) ? keep : (hasMembers?"members":"degree");
+  $("#sizeby").value=sizeBy;
+  sizeMax={ atc:Math.max(1e-9,...nodes.map(n=>+n.atc||0)),
+            atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)),
+            members:Math.max(1e-9,...nodes.map(n=>+n.members||0)) };
+}
+// ATC propagation trace setup (from graph_atc enrichment OR an in-browser recompute)
+function setupProp(){
+  trace=G.atc_trace?.steps||[];
+  themeRGB=(G.theme_colors||[]).map(hexToRgb);
+  prop={step:null, playing:false, timer:null};
+  // running ATC: cumulative Σ ‖Δrowᵢ‖·(1−coinertiaₚ), normalized to the final total.
+  runAtc=null;
+  if(trace.length){
+    const nN=nodes.length; let cum=new Array(nN).fill(0); const run=[cum.slice()];
+    for(let p=1;p<trace.length;p++){ const d=trace[p].delta, c=1-(trace[p].coinertia||0);
+      for(let i=0;i<nN;i++) cum[i]+=(d?+d[i]:0)*c; run.push(cum.slice()); }
+    const tot=cum.reduce((a,b)=>a+b,0)||1; runAtc=run.map(a=>a.map(v=>v/tot));
+  }
+  const ps=$("#propsec");
+  if(trace.length && G.themes){
+    ps.style.display="";
+    $("#propnote").textContent=`by ${G.atc_trace.annotation||"annotation"}`;
+    $("#propintro").innerHTML=`Watch the ${G.themes.length} theme weights T<sup>p</sup> diffuse. Node size = ATC accrued so far; colour blends the theme mix <b>when coloured by ${G.atc_trace.annotation||"the annotation"}</b> (otherwise your colouring is kept).`;
+    $("#propscrub").max=trace.length-1; $("#propscrub").value=0;
+    $("#propstep").textContent="off";
+    $("#propinfo").textContent="";
+  } else ps.style.display="none";
+}
 let hasFixedLayout=false;
 function load(g){
   G=g;
+  atcRecomputed=false;
   selected=new Set(); focus=null;   // node indices are graph-specific — reset on (re)load
   $("#modq").textContent=""; $("#modlist").innerHTML=""; $("#modhint").style.display="";
   // Fixed layout: use igraph coordinates from the graph when present (y flipped
@@ -489,39 +626,8 @@ function load(g){
   colorField=g.meta?.color_by||opts[0];
   $("#colorby").value=colorField;
 
-  // size-by options: degree always; ATC variants when present
-  const hasAtc=nodes.some(n=>n.atc!=null), hasMembers=nodes.some(n=>n.members!=null);
-  const sizeOpts=[["degree","degree"]];
-  if(hasMembers) sizeOpts.push(["members","taxon size (# species)"]);
-  if(hasAtc){ sizeOpts.push(["atc","ATC (dist·co-inertia)"],["atc_last","ATC (last config)"]); }
-  $("#sizeby").innerHTML=sizeOpts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
-  sizeBy=hasMembers?"members":"degree"; $("#sizeby").value=sizeBy;
-  sizeMax={ atc:Math.max(1e-9,...nodes.map(n=>+n.atc||0)),
-            atc_last:Math.max(1e-9,...nodes.map(n=>+n.atc_last||0)),
-            members:Math.max(1e-9,...nodes.map(n=>+n.members||0)) };
-
-  // ATC propagation trace (from graph_atc enrichment)
-  trace=g.atc_trace?.steps||[];
-  themeRGB=(g.theme_colors||[]).map(hexToRgb);
-  prop={step:null, playing:false, timer:null};
-  // running ATC: cumulative Σ ‖Δrowᵢ‖·(1−coinertiaₚ) up to each step, normalized
-  // to the final total so it grows toward the final `atc` score.
-  runAtc=null;
-  if(trace.length){
-    const nN=nodes.length; let cum=new Array(nN).fill(0); const run=[cum.slice()];
-    for(let p=1;p<trace.length;p++){ const d=trace[p].delta, c=1-(trace[p].coinertia||0);
-      for(let i=0;i<nN;i++) cum[i]+=(d?+d[i]:0)*c; run.push(cum.slice()); }
-    const tot=cum.reduce((a,b)=>a+b,0)||1; runAtc=run.map(a=>a.map(v=>v/tot));
-  }
-  const ps=$("#propsec");
-  if(trace.length && g.themes){
-    ps.style.display="";
-    $("#propnote").textContent=`by ${g.atc_trace.annotation||"annotation"}`;
-    $("#propintro").innerHTML=`Watch the ${g.themes.length} theme weights T<sup>p</sup> diffuse. Node size = ATC accrued so far; colour blends the theme mix <b>when coloured by ${g.atc_trace.annotation||"the annotation"}</b> (otherwise your colouring is kept).`;
-    $("#propscrub").max=trace.length-1; $("#propscrub").value=0;
-    $("#propstep").textContent="off";
-    $("#propinfo").textContent="";
-  } else ps.style.display="none";
+  setupSizeBy(false);
+  setupProp();
 
   // ecorr slider range from data
   const absE=edges.map(e=>Math.abs(e.ecorr)).filter(v=>isFinite(v));
@@ -580,6 +686,9 @@ function load(g){
   }catch(e){}
   if(q.get("view")){ const v=q.get("view").split(",").map(Number);
     if(v.length===3 && v.every(isFinite)){ view.x=v[0]; view.y=v[1]; view.k=v[2]; } }
+  // re-run an ATC recompute on the (restored) finalized topology — deterministic.
+  if(q.get("atcw")) $("#atcweight").checked=true;
+  if(q.get("atcrec")){ try{ recomputeAtc(); }catch(err){ console.error("ATC recompute failed:",err); } }
   render();
   const b=$("#badge");
   b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
@@ -1531,6 +1640,7 @@ function setProp(s){
   drawLegend(); render();
 }
 $("#propscrub").oninput=e=>{ if(prop.playing) playProp(); setProp(+e.target.value); };
+$("#atcrecompute").onclick=recomputeAtc;
 $("#propplay").onclick=()=>playProp();
 $("#propstyle").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   $("#propstyle").querySelectorAll("button").forEach(x=>x.classList.remove("on"));

@@ -138,6 +138,18 @@ graphs:
   filtering." (`?sim=1` / `?layout=` for shareable views.)
 - **Size by** degree, taxon size, or ATC (dist·co-inertia / last-config), when
   available.
+- **Recompute ATC on a finalized topology** — the stored `atc` is computed once,
+  on the raw full network. Once you've *finalized* the topology (edge filters,
+  min-degree, and especially **excluding contaminants** — e.g. colour by species
+  and toggle off *Homo sapiens*, or colour by phylum and toggle off *Chordata*),
+  hit **↻ Recompute on current view** in the ATC panel: the propagation is re-run
+  **in-browser on exactly the visible sub-network** (JS port of the engine,
+  validated against the R 10-node reference to ~1e-8), updating every node's
+  `atc`/`atc_last`, the size-by, the theme set, and the propagation trace.
+  Optional `weighted` uses `|ecorr|`. This matters because a broad weak hub (host
+  DNA, dietary fungi) otherwise dominates ATC; drop it and the real biology
+  surfaces. The action is part of the shareable/persisted state (`?atcrec=1`,
+  `?atcw=1`), so it re-runs deterministically on the restored topology.
 - **ATC propagation** — when the graph has an `atc_trace` (see below), a
   play/scrub timeline animates the annotation propagation *on the real network*:
   node **size** grows with the ATC accrued so far, and node **colour** shows the
