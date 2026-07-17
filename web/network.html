@@ -56,10 +56,17 @@
   #tip .r{display:flex;justify-content:space-between;gap:12px;color:var(--muted)}
   #tip .r b{color:var(--ink);font-variant-numeric:tabular-nums}
 
-  aside{background:var(--panel);border-left:1px solid var(--line);overflow:auto}
-  .sec{padding:14px 16px;border-bottom:1px solid var(--line2)}
+  aside{background:var(--panel);border-left:1px solid var(--line);overflow:auto;display:flex;flex-direction:column}
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line2);flex:none}
   .sec h2{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650;
     display:flex;justify-content:space-between;align-items:center}
+  /* collapsible sections: click the header to fold; a caret shows state */
+  .sec.cl > h2{cursor:pointer;justify-content:flex-start;gap:8px}
+  .sec.cl > h2 .hint{margin-left:0}
+  .sec.cl > h2::after{content:"▾";margin-left:auto;color:var(--muted);font-size:10px;transition:transform .12s}
+  .sec.cl.collapsed > h2{margin-bottom:0}
+  .sec.cl.collapsed > h2::after{transform:rotate(-90deg)}
+  .sec.cl.collapsed > *:not(h2){display:none !important}
   .kv{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
   .kv .k{color:var(--muted)} .kv b{font-variant-numeric:tabular-nums;font-weight:600}
   label.row{display:flex;flex-direction:column;gap:5px;margin:10px 0}
@@ -194,17 +201,17 @@
     <div id="tip"></div>
   </div>
   <aside>
-    <div class="sec">
+    <div class="sec" style="order:1">
       <h2>Network</h2>
       <div id="stats"></div>
     </div>
 
-    <div class="sec" id="inspect">
+    <div class="sec" id="inspect" style="order:2">
       <h2>Node</h2>
       <div class="hint">Click a node to select it.</div>
     </div>
 
-    <div class="sec">
+    <div class="sec cl" style="order:3">
       <h2>Colour by</h2>
       <select id="colorby"></select>
       <div class="legend" id="legend" style="margin-top:9px"></div>
@@ -216,7 +223,7 @@
         <input type="checkbox" id="autoflow"> auto-flow layout on filter</label>
     </div>
 
-    <div class="sec">
+    <div class="sec cl collapsed" style="order:7">
       <h2>Modularity <span class="hint" id="modq"></span></h2>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--muted)">
         <input type="checkbox" id="modweight" checked> weight by |ecorr|</label>
@@ -229,7 +236,7 @@
       <div id="modlist" class="nbrs" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec" id="subgsec" style="display:none">
+    <div class="sec cl collapsed" id="subgsec" style="display:none;order:8">
       <h2>Spectral subgraphs <span class="hint" id="subgnote"></span></h2>
       <div class="hint" id="subgintro">The overlapping subgraphs the spectral embedding reconstructed and fused into this consensus network — “the subnetworks that made it”.</div>
       <button class="btn" id="subgcov" style="width:100%;margin-top:9px;justify-content:center">Overlap heatmap (coverage)</button>
@@ -244,13 +251,13 @@
       <div class="rec" id="subginfo" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec" id="layersec" style="display:none">
+    <div class="sec cl" id="layersec" style="display:none;order:5">
       <h2>Taxonomic layer</h2>
-      <select id="layer"></select>
+      <div class="seg" id="layerseg" style="flex-wrap:wrap"></div>
       <div class="hint" id="layernote" style="margin-top:7px">FunNet functional layer: taxon membership is propagated over the species network; taxa are linked by self-tuning Gaussian proximity of their propagated profiles and laid out by classic MDS (proximity ≈ functional, not just direct contacts).</div>
     </div>
 
-    <div class="sec" id="propsec" style="display:none">
+    <div class="sec cl" id="propsec" style="display:none;order:6">
       <h2>ATC propagation <span class="hint" id="propnote"></span></h2>
       <div class="hint" id="propintro" style="margin-bottom:8px"></div>
       <div class="trow" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -270,7 +277,7 @@
       <div class="rec" id="propinfo" style="margin-top:8px"></div>
     </div>
 
-    <div class="sec">
+    <div class="sec cl" style="order:4">
       <h2>Edge filters</h2>
       <label class="row"><span class="lh">min |ecorr| <b id="ecv"></b></span>
         <input type="range" id="ec" min="0" max="1" step="0.001"></label>
@@ -287,7 +294,7 @@
         <input type="range" id="md" min="0" max="10" step="1" value="0"></label>
     </div>
 
-    <div class="sec">
+    <div class="sec cl collapsed" style="order:9">
       <h2>Scale-free topology <span class="hint" id="sfnote"></span></h2>
       <canvas id="sf"></canvas>
       <div class="verdict" id="verdict"></div>
@@ -380,8 +387,9 @@ function loadBase(g){
   const q=getParams();
   layerRank = (q.get("layer") && RANKS.includes(q.get("layer"))) ? q.get("layer") : "species";
   const present=RANKS.filter(r=> r==="species" || (g.nodes||[]).some(n=>n[r]));
-  $("#layer").innerHTML=present.map(r=>`<option value="${r}">${r==="species"?"species (full)":r}</option>`).join("");
-  $("#layer").value = present.includes(layerRank) ? layerRank : (layerRank="species");
+  if(!present.includes(layerRank)) layerRank="species";
+  $("#layerseg").innerHTML=present.map(r=>
+    `<button data-r="${r}" class="${r===layerRank?'on':''}" title="${r==='species'?'species (full network)':r+'-level functional layer'}">${r==='species'?'species':r}</button>`).join("");
   $("#layersec").style.display = present.length>1 ? "" : "none";
   load(layerRank==="species" ? g : funnetLayer(g, layerRank));
 }
@@ -1815,7 +1823,12 @@ $("#sign").querySelectorAll("button").forEach(b=>b.onclick=()=>{
 });
 $("#colorby").onchange=e=>{ colorField=e.target.value; buildColors(); apply(); };
 $("#sizeby").onchange=e=>{ sizeBy=e.target.value; render(); };
-$("#layer").onchange=e=>{ layerRank=e.target.value; applyLayer(); };
+// collapsible sidebar sections — click a header to fold/unfold
+$("aside").addEventListener("click", e=>{ const h2=e.target.closest("h2");
+  if(h2 && h2.parentElement.classList.contains("cl")) h2.parentElement.classList.toggle("collapsed"); });
+$("#layerseg").onclick=e=>{ const b=e.target.closest("button[data-r]"); if(!b||b.dataset.r===layerRank) return;
+  layerRank=b.dataset.r; $("#layerseg").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.r===layerRank));
+  applyLayer(); };
 $("#applyrec").onclick=()=>{ if(!recBest)return; const ec=$("#ec");
   ec.value=recBest.t.toFixed(3); filt.ec=+ec.value; syncLabels(); apply(); };
 
