@@ -30,6 +30,8 @@ fn params() -> Params {
         // The R fixtures were produced by R's own order-dependent spectral step
         // (see src/spectral.rs); reproducing them requires the legacy path.
         legacy_lrw: true,
+        hc_orders: 1,
+        hc_order_freq: 0.5,
     }
 }
 

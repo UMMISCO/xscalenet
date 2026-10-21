@@ -71,6 +71,8 @@ for a features-in-rows matrix (feature id in column 1, header = observation ids)
 | `--scale-free` | off | sweep `|ecorr|` thresholds, fit `P(k) ~ k^-γ`, recommend one |
 | `--iterative-eigen` | off | Lanczos eigensolver (needs a fixed `--eigen-perc`; not bit-identical) |
 | `--legacy-lrw` | off | reproduce the pre-0.2 **column-order-dependent** spectral step (see below) |
+| `--hc-orders` | `400` | random variable orderings fused per subgraph by the Bayesian step |
+| `--hc-order-freq` | `0.0` | drop arcs seen in fewer than this fraction of orderings |
 
 Example (matches the `scs` call in the R package):
 
@@ -114,9 +116,52 @@ pretending otherwise:
 * a **`G+`/`G-` cut inside a block of numerically-tied components** makes subset
   membership arbitrary at the available precision.
 
-Collapse duplicate variables before reconstruction to remove both. Hill climbing
-remains **seed**-dependent by design (Jaccard 0.88–0.98 across seeds) — it is a
-stochastic search; record `--seed`.
+Collapse duplicate variables before reconstruction to remove both.
+
+### Reproducibility: variable names
+
+Order-invariance is not enough. Hill climbing keeps the *first* best-scoring move
+it finds, so the order in which it visits candidate moves decides every tie and
+steers the greedy path. Version 0.2 fixed that order to the node names: that made
+runs **reproducible but not invariant** — the network was still a function of an
+arbitrary ordering, now alphabetical, so a taxonomic rename
+(`Chromis` → `Pycnochromis`) moved edges (Jaccard 0.65–0.93 on the reference
+matrices). ARACNE was unaffected throughout, since its DPI decisions read the
+unmodified MI matrix.
+
+Since 0.3 the Bayesian step runs under `--hc-orders` **random** variable
+orderings per subgraph and fuses them. Each arc votes with the fraction of
+orderings that inferred it, and those fractional votes feed the existing
+presence-frequency consensus — so `--thresh` keeps its published meaning, "the
+share of local reconstructions that found this edge", now estimated from a soft
+vote instead of one tie-break. `--hc-order-freq` is only a noise floor below
+which an arc contributes nothing. The orderings are drawn from `--seed` and the
+subgraph index, neither of which depends on names or column positions, so the
+result is invariant to renaming and reordering **up to Monte-Carlo error**, which
+shrinks as the ordering count grows:
+
+| `--hc-orders` | rename Jaccard | s/run (135 vars) |
+|---|---|---|
+| 1 (= 0.2 behaviour) | 0.65–0.93 | 0.1 |
+| 24 | 0.91–0.96 | 2.0 |
+| 100 | 0.95–0.98 | 4.7 |
+| 200 | 0.98–0.99 | 8.9 |
+| **400 (default)** | **0.99** | **18** |
+
+The default is chosen to clear a 2 % edge difference. Lower it knowingly on large
+matrices, or use `--methods aracne`, which is exactly invariant at no cost.
+
+**`--restart` defaults to 0 when ordering consensus is on.** Restarts and
+orderings both diversify the greedy search, and under consensus the restarts are
+redundant: keeping 21 of them alongside 400 orderings *lowered* rename
+reproducibility (0.974–0.978 vs 0.988–0.995) while doubling the runtime, because
+each restart adds variation that is never averaged. An explicit `--restart` is
+always honoured, and `--hc-orders 1` keeps the published default of 21.
+
+Hill climbing remains **seed**-dependent, by design — it is a stochastic search.
+Record `--seed`. At the default ordering count the seed and rename sensitivities
+coincide (both ≈0.99), which is the expected floor: renaming resamples the
+orderings, so it is statistically a seed change.
 
 ### Outputs (same layout as the R package)
 

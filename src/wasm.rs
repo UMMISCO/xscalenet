@@ -108,6 +108,11 @@ fn reconstruct_inner(
         maxp: usize::MAX,
         iterative_eigen: false,
         legacy_lrw: false,
+        // Lower than the CLI default: the wasm build is single-threaded, so the
+        // in-browser budget caps the orderings. Reproducibility is accordingly
+        // weaker (see README); the server build uses the full default.
+        hc_orders: 24,
+        hc_order_freq: 0.0,
     };
     let config = RunConfig { methods, params };
 

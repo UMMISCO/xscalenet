@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.3.0 — unreleased
+
+### Fixed: the Bayesian step depended on variable *names*
+
+0.2 made the reconstruction invariant to column order, partly by scanning
+hill-climbing moves in node-name order. That is reproducible but **not
+invariant**: the network stayed a function of an arbitrary ordering, now
+alphabetical, so renaming variables while keeping the data identical moved edges
+(rename Jaccard 0.65–0.93 on the four reference matrices). In a study where a
+taxonomic update renames a genus, that path changes results.
+
+The Bayesian step now runs each subgraph under `--hc-orders` **random** variable
+orderings and fuses them. Hill climbing keeps the first best-scoring move it
+finds, so the visit order decides every tie; averaging over random orders removes
+the dependence on any particular one. The orderings are drawn from `--seed` and
+the subgraph index — both invariant to names and column positions — so the result
+is invariant to renaming and reordering up to Monte-Carlo error.
+
+**How the votes are fused.** Each arc votes with the fraction of orderings that
+inferred it, and those fractional votes go into the *existing* presence-frequency
+consensus (`SubEdge::weight`, summed by `gather`). The alternative — thresholding
+within each subgraph and casting a binary vote — was measured and rejected: it
+puts a knife edge at the threshold where the ordering-frequency distribution is
+densest, and it was consistently less reproducible. Fractional voting also keeps
+`--thresh` meaning exactly what it did ("the share of local reconstructions that
+found this edge"), only estimated from a soft vote rather than from one
+tie-break, and it degrades to the old binary vote at `--hc-orders 1`. ARACNE
+votes 1.0 and so is bit-identical to before, which the golden fixtures confirm.
+
+### Added
+
+* `--hc-orders` (default **400**) and `--hc-order-freq` (default `0.0`, a noise
+  floor). 400 clears a 2 % edge difference under renaming and reordering on the
+  reference matrices; the README tabulates reproducibility and runtime against
+  the ordering count. The wasm build defaults to 24, since it is single-threaded.
+* `SubEdge::weight` — how strongly a subgraph votes for an edge. `gather`
+  accumulates `f64` votes instead of integer counts.
+* Tests: rename-invariance for both methods at the shipped defaults, and a guard
+  that single-ordering hill climbing is reproducible but *not* rename-invariant,
+  so the distinction the README draws cannot go stale.
+
+### Changed
+
+* **`--restart` now defaults to 0 when `--hc-orders > 1`.** Restarts and
+  orderings both diversify the greedy search; under consensus the restarts are
+  redundant and actively harmful — 21 restarts alongside 400 orderings *lowered*
+  rename reproducibility (0.974–0.978 vs 0.988–0.995) and doubled the runtime,
+  because each restart adds variation that is never averaged. An explicit
+  `--restart` is honoured, and `--hc-orders 1` or `--legacy-lrw` keeps 21.
+* **Results differ from 0.2.** `--legacy-lrw` still reproduces 0.1.x exactly: it
+  forces a single ordering and the published restart count.
+
 ## 0.2.0 — unreleased
 
 ### Fixed: the reconstruction depended on input column order

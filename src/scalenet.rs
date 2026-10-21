@@ -54,6 +54,14 @@ pub struct Params {
     /// selection and in hill-climbing. Only for reproducing results published
     /// before the fix; see [`crate::spectral`].
     pub legacy_lrw: bool,
+    /// Number of random variable orderings the Bayesian hill climbing is run
+    /// under per subgraph, whose results are then fused (see
+    /// [`crate::hc::reconstruct`]). `1` = a single ordering, which makes the
+    /// network a function of that arbitrary order. Ignored by ARACNE, which is
+    /// order-invariant already.
+    pub hc_orders: usize,
+    /// Fraction of those orderings an arc must appear in to be kept.
+    pub hc_order_freq: f64,
 }
 
 /// The per-pair values for one present edge (`NaN` = NA). Presence is implicit:
@@ -231,6 +239,11 @@ pub fn run_method(
                 if !params.legacy_lrw {
                     ordered.sort_by(|&x, &y| data.names[x].cmp(&data.names[y]));
                 }
+                // The subgraph index is itself order- and name-invariant (it
+                // comes from the eigenvector rank and the canonical G+/G- sign),
+                // so seeding the orderings from it keeps them reproducible
+                // without reintroducing a dependence on the input layout.
+                let orders = if params.legacy_lrw { 1 } else { params.hc_orders };
                 hc::reconstruct(
                     &ordered,
                     &data.cols,
@@ -240,20 +253,27 @@ pub fn run_method(
                     params.max_iter,
                     params.iss,
                     params.maxp,
+                    orders,
+                    params.hc_order_freq,
                 )
             }
         })
         .collect();
 
-    // Gather: presence / forward / backward / possible counts per pair. These
-    // are dense u32 arrays because, with overlapping subgraphs, most pairs are
-    // "possible" — dense arrays are both faster and smaller than a hash map at
-    // this coverage. They are transient; the persistent per-threshold edge lists
-    // built below are sparse.
+    // Gather: presence / forward / backward votes and co-selection counts per
+    // pair. These are dense arrays because, with overlapping subgraphs, most
+    // pairs are "possible" — dense arrays are both faster and smaller than a
+    // hash map at this coverage. They are transient; the persistent
+    // per-threshold edge lists built below are sparse.
+    //
+    // The vote arrays are `f64` because a method may vote fractionally (hill
+    // climbing under ordering consensus weights an arc by the share of variable
+    // orderings that inferred it). A method that votes 1.0 per subgraph, like
+    // ARACNE, yields exact integers here and so the same frequencies as before.
     let n = npairs(p);
-    let mut presence = vec![0u32; n];
-    let mut forward = vec![0u32; n];
-    let mut backward = vec![0u32; n];
+    let mut presence = vec![0.0f64; n];
+    let mut forward = vec![0.0f64; n];
+    let mut backward = vec![0.0f64; n];
     let mut possible = vec![0u32; n];
     let mut scores: HashMap<usize, Vec<f64>> = HashMap::new();
 
@@ -265,10 +285,10 @@ pub fn run_method(
         }
         for e in edges {
             let idx = pair_index(e.a, e.b, p);
-            presence[idx] += 1;
+            presence[idx] += e.weight;
             match e.eorient {
-                2 => forward[idx] += 1,
-                -2 => backward[idx] += 1,
+                2 => forward[idx] += e.weight,
+                -2 => backward[idx] += e.weight,
                 _ => {}
             }
             if !e.score.is_nan() {
@@ -296,7 +316,7 @@ pub fn run_method(
                 if possible[idx] == 0 {
                     continue;
                 }
-                let freq = presence[idx] as f64 / possible[idx] as f64;
+                let freq = presence[idx] / possible[idx] as f64;
                 if freq < thr {
                     continue;
                 }

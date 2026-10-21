@@ -27,7 +27,156 @@ fn params(legacy: bool) -> Params {
         maxp: usize::MAX,
         iterative_eigen: false,
         legacy_lrw: legacy,
+        hc_orders: 24,
+        hc_order_freq: 0.0,
     }
+}
+
+/// The parameters the CLI actually ships, including the restart coupling: under
+/// ordering consensus the hill-climbing restarts are redundant and add
+/// unaveraged variance, so the CLI defaults them to none.
+fn shipped_params() -> Params {
+    Params {
+        restart: 0,
+        hc_orders: 400,
+        hc_order_freq: 0.0,
+        ..params(false)
+    }
+}
+
+/// Relabel every variable so the alphabetical order of the names changes while
+/// the data columns stay exactly where they are. Returns the new dataset and the
+/// map back to the original names.
+fn rename(d: &Dataset, seed: u64) -> (Dataset, std::collections::HashMap<String, String>) {
+    let p = d.ncol();
+    let mut labels: Vec<String> = (0..p).map(|i| format!("N{i:05}")).collect();
+    let mut state = seed | 1;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for i in (1..p).rev() {
+        labels.swap(i, (next() % (i as u64 + 1)) as usize);
+    }
+    let back: std::collections::HashMap<String, String> = labels
+        .iter()
+        .cloned()
+        .zip(d.names.iter().cloned())
+        .collect();
+    let renamed = Dataset {
+        names: labels,
+        cols: d.cols.clone(),
+        levels: d.levels.clone(),
+        nrow: d.nrow,
+    };
+    (renamed, back)
+}
+
+fn jaccard(a: &BTreeSet<(String, String)>, b: &BTreeSet<(String, String)>) -> f64 {
+    let u = a.union(b).count();
+    if u == 0 {
+        1.0
+    } else {
+        a.intersection(b).count() as f64 / u as f64
+    }
+}
+
+fn edge_names_with(d: &Dataset, method: Method, p: &Params) -> BTreeSet<(String, String)> {
+    let prep = scalenet::prepare(d, p).unwrap();
+    let lists = scalenet::run_method(d, &prep, method, p);
+    lists[0]
+        .edges
+        .keys()
+        .map(|&idx| {
+            let (a, b) = xscalenet::util::pair_at(idx, d.ncol());
+            let (x, y) = (d.names[a].clone(), d.names[b].clone());
+            if x < y { (x, y) } else { (y, x) }
+        })
+        .collect()
+}
+
+/// Map a renamed run's edges back to the original variable names.
+fn back_mapped(
+    rd: &Dataset,
+    method: Method,
+    p: &Params,
+    back: &std::collections::HashMap<String, String>,
+) -> BTreeSet<(String, String)> {
+    edge_names_with(rd, method, p)
+        .into_iter()
+        .map(|(x, y)| {
+            let (a, b) = (back[&x].clone(), back[&y].clone());
+            if a < b { (a, b) } else { (b, a) }
+        })
+        .collect()
+}
+
+/// Ordering consensus must make the Bayesian step invariant to *renaming*, not
+/// just to column order. A single fixed ordering — even a deterministic one like
+/// node-name order (xscalenet 0.2) — makes the network a function of that
+/// arbitrary order, so a taxonomic rename changes edges.
+#[test]
+fn bayes_hc_edges_are_rename_invariant() {
+    let data = synthetic();
+    let p = shipped_params();
+    let base = edge_names_with(&data, Method::BayesHc, &p);
+    assert!(!base.is_empty(), "no hill-climbing edges to compare");
+
+    for seed in [7u64, 99, 4242] {
+        let (rd, back) = rename(&data, seed);
+        let j = jaccard(&base, &back_mapped(&rd, Method::BayesHc, &p, &back));
+        assert!(
+            j >= 0.98,
+            "renaming changed the hill-climbing network: Jaccard {j:.4} < 0.98 (seed {seed})"
+        );
+    }
+}
+
+/// ARACNE needs no consensus: its DPI decisions read the unmodified MI matrix,
+/// so they are a pure function of the three edge weights in each triangle.
+#[test]
+fn aracne_edges_are_rename_invariant() {
+    let data = synthetic();
+    let p = shipped_params();
+    let base = edge_names_with(&data, Method::Aracne, &p);
+    for seed in [7u64, 99] {
+        let (rd, back) = rename(&data, seed);
+        assert_eq!(
+            back_mapped(&rd, Method::Aracne, &p, &back),
+            base,
+            "renaming changed the ARACNE network (seed {seed})"
+        );
+    }
+}
+
+/// A single ordering is reproducible but *not* invariant — this pins the
+/// distinction the README documents, so nobody mistakes 0.2 for a fix.
+#[test]
+fn single_ordering_is_reproducible_but_not_rename_invariant() {
+    let data = synthetic();
+    let one = Params { hc_orders: 1, ..params(false) };
+
+    assert_eq!(
+        edge_names_with(&data, Method::BayesHc, &one),
+        edge_names_with(&data, Method::BayesHc, &one),
+        "a single ordering should at least be reproducible"
+    );
+
+    let base = edge_names_with(&data, Method::BayesHc, &one);
+    let mut any_differs = false;
+    for seed in [7u64, 99, 4242, 5, 61] {
+        let (rd, back) = rename(&data, seed);
+        if back_mapped(&rd, Method::BayesHc, &one, &back) != base {
+            any_differs = true;
+        }
+    }
+    assert!(
+        any_differs,
+        "single-ordering hill climbing is unexpectedly rename-invariant; if this \
+         became true the README's reproducible-but-not-invariant note is stale"
+    );
 }
 
 fn pop2mat() -> Dataset {
