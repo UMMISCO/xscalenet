@@ -27,6 +27,9 @@ fn params() -> Params {
         iss: 1.0,
         maxp: usize::MAX,
         iterative_eigen: false,
+        // The R fixtures were produced by R's own order-dependent spectral step
+        // (see src/spectral.rs); reproducing them requires the legacy path.
+        legacy_lrw: true,
     }
 }
 

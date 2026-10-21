@@ -158,6 +158,7 @@ fn build_graph_json(
         iss: num_f("iss", 1.0),
         maxp: f.get("maxp").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX),
         iterative_eigen: flag("iterative_eigen"),
+        legacy_lrw: flag("legacy_lrw"),
     };
 
     let config = RunConfig { methods, params };

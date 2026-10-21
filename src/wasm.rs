@@ -107,6 +107,7 @@ fn reconstruct_inner(
         iss: 1.0,
         maxp: usize::MAX,
         iterative_eigen: false,
+        legacy_lrw: false,
     };
     let config = RunConfig { methods, params };
 

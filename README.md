@@ -68,6 +68,9 @@ for a features-in-rows matrix (feature id in column 1, header = observation ids)
 | `--atc-col <name>` | col 2 | annotation column to propagate |
 | `--theme-network` | off | build the multi-layer theme-proximity network |
 | `--json` | off | also export `graph.json` (nodes+metrics+edges+theme layer) |
+| `--scale-free` | off | sweep `|ecorr|` thresholds, fit `P(k) ~ k^-γ`, recommend one |
+| `--iterative-eigen` | off | Lanczos eigensolver (needs a fixed `--eigen-perc`; not bit-identical) |
+| `--legacy-lrw` | off | reproduce the pre-0.2 **column-order-dependent** spectral step (see below) |
 
 Example (matches the `scs` call in the R package):
 
@@ -80,6 +83,40 @@ Or run directly on a raw gzipped, features-in-rows matrix:
 ```sh
 xscalenet all_samples.20M.nsat.gz out --transpose --discretize
 ```
+
+### Reproducibility: column order
+
+Up to version 0.1 the reconstruction **depended on the order of the input
+columns**: renaming variables changed nothing, but shuffling them changed the
+network (edge Jaccard 0.23–0.49 across 10 permutations on four real datasets).
+
+`Lrw = I − D⁻¹W` is not symmetric, yet R ScaleNet decomposes it with
+`eigen(symmetric = TRUE)`, which reads only the **lower triangle** — so each
+off-diagonal entry is divided by the degree of whichever endpoint has the larger
+index. Permuting the columns changes *the matrix being decomposed*, hence the
+eigenvectors, the spectral subsets, and every edge. xscalenet reproduced this
+faithfully, because it was porting it.
+
+Since 0.2 the default path decomposes the symmetric normalised Laplacian
+`Lsym = I − D^-1/2 W D^-1/2` and maps its eigenvectors back to `Lrw`'s
+(`v = D^-1/2 u`, same eigenvalues), canonicalises eigenvector signs, and orders
+each subgraph's variables by name before hill climbing. The result is **exactly
+order-invariant** (Jaccard 1.0000 over 10 permutations on all four datasets).
+Two side effects are expected and correct: the elbow heuristic now sees the real
+eigenvalues, so `k` and the edge count both rise; and results differ from
+pre-0.2 runs. Pass `--legacy-lrw` to reproduce those.
+
+Two inputs are *intrinsically* ambiguous, and the run now warns instead of
+pretending otherwise:
+
+* **duplicate or MI-equivalent variables** make eigenvalues exactly degenerate,
+  so no unique eigenvector exists;
+* a **`G+`/`G-` cut inside a block of numerically-tied components** makes subset
+  membership arbitrary at the available precision.
+
+Collapse duplicate variables before reconstruction to remove both. Hill climbing
+remains **seed**-dependent by design (Jaccard 0.88–0.98 across seeds) — it is a
+stochastic search; record `--seed`.
 
 ### Outputs (same layout as the R package)
 

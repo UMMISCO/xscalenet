@@ -32,6 +32,27 @@ pub fn run(
         prep.subgraphs.len(),
         prep.subset_m
     ));
+    if prep.boundary_ties > 0 {
+        progress(&format!(
+            "# WARNING: on {} of the {} eigenvectors the G+/G- cut falls inside a block \
+             of numerically-tied components, so which variables enter those subsets is \
+             arbitrary and the resulting edges are not reproducible across input column \
+             orders. Caused by duplicate or near-duplicate variables; collapse them \
+             before reconstruction.",
+            prep.boundary_ties,
+            prep.spectral.k.saturating_sub(1)
+        ));
+    }
+    if prep.spectral.degenerate_pairs > 0 {
+        progress(&format!(
+            "# WARNING: {} of the {} retained eigenvalues are degenerate, so their \
+             eigenvectors — and the spectral subsets built from them — are not \
+             uniquely defined and still depend on input column order. This is caused \
+             by duplicate or mutual-information-equivalent variables; collapse them \
+             before reconstruction to get a reproducible network.",
+            prep.spectral.degenerate_pairs, prep.spectral.k
+        ));
+    }
 
     // Precompute per-column ranks once (reused for every edge's ecorr).
     let ranks = data.rank_matrix();

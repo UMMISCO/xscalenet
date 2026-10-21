@@ -48,6 +48,12 @@ pub struct Params {
     /// Use the iterative (Lanczos) eigensolver for the spectral embedding — a
     /// fast path when `eigen_perc` is fixed. Off by default (dense, bit-identical).
     pub iterative_eigen: bool,
+    /// Reproduce the pre-fix, **column-order-dependent** pipeline: decompose the
+    /// lower triangle of the non-symmetric `Lrw` (as R does), skip eigenvector
+    /// sign canonicalisation, and keep the index-order tie-breaks in the subset
+    /// selection and in hill-climbing. Only for reproducing results published
+    /// before the fix; see [`crate::spectral`].
+    pub legacy_lrw: bool,
 }
 
 /// The per-pair values for one present edge (`NaN` = NA). Presence is implicit:
@@ -95,6 +101,12 @@ pub struct Prep {
     pub subset_m: usize,
     /// Subgraphs: each carries the ascending global column indices it spans.
     pub subgraphs: Vec<Vec<usize>>,
+    /// How many eigenvectors had their `G+`/`G-` cut fall inside a block of
+    /// numerically-indistinguishable components. For those, which variables
+    /// enter the subset is arbitrary at the available precision, so the subset —
+    /// and the edges derived from it — are not reproducible across input column
+    /// orders. Caused by duplicate or near-duplicate input variables.
+    pub boundary_ties: usize,
 }
 
 /// Compute the spectral embedding and derive the spectral subgraphs.
@@ -112,6 +124,7 @@ pub fn prepare(data: &Dataset, params: &Params) -> Result<Prep, String> {
         subset_m,
         params.iterative_eigen,
         params.seed,
+        params.legacy_lrw,
     )?;
 
     // Map surviving node name -> global column index.
@@ -125,13 +138,43 @@ pub fn prepare(data: &Dataset, params: &Params) -> Result<Prep, String> {
     let q = sp.node_names.len();
     let m = subset_m.min(q);
     let mut subgraphs = Vec::new();
+    // Eigenvectors whose G+/G- cut falls inside a numerically-tied block.
+    let mut boundary_ties = 0usize;
     // Eigenvectors 2..k (skip the trivial smallest one at column 0).
     for c in 1..sp.k {
         // (surviving-row-index, value)
         let mut order: Vec<usize> = (0..q).collect();
         order.sort_by(|&i, &j| {
-            sp.eigenvectors[j][c].total_cmp(&sp.eigenvectors[i][c])
-        }); // descending by value
+            // Descending by eigenvector value. An exact tie must not fall back
+            // to the surviving-row index, which *is* the input column order, so
+            // break it on the node name instead. Values that merely sit close
+            // together are left in value order: they are reproducible to ~1e-14
+            // and reordering them on a tolerance would replace a stable
+            // comparison with a noise-sensitive grouping decision (measured:
+            // doing so costs eDNA_own its exact invariance). Where the boundary
+            // genuinely falls inside a tied block the selection is ill-posed,
+            // and `boundary_ties` reports it rather than hiding it.
+            let by_value = sp.eigenvectors[j][c].total_cmp(&sp.eigenvectors[i][c]);
+            if params.legacy_lrw {
+                by_value
+            } else {
+                by_value.then_with(|| sp.node_names[i].cmp(&sp.node_names[j]))
+            }
+        });
+
+        // Is either cut sitting inside a block of numerically-equal values? Then
+        // which variables land in the subset is arbitrary at the available
+        // precision, and the subset is not reproducible across column orders.
+        if !params.legacy_lrw {
+            let scale = (0..q)
+                .map(|r| sp.eigenvectors[r][c].abs())
+                .fold(0.0f64, f64::max);
+            let tol = scale * 1e-12;
+            let val = |r: usize| sp.eigenvectors[order[r]][c];
+            if (val(m - 1) - val(m)).abs() <= tol || (val(q - m - 1) - val(q - m)).abs() <= tol {
+                boundary_ties += 1;
+            }
+        }
 
         let top: Vec<usize> = order[..m]
             .iter()
@@ -154,6 +197,7 @@ pub fn prepare(data: &Dataset, params: &Params) -> Result<Prep, String> {
         spectral: sp,
         subset_m,
         subgraphs,
+        boundary_ties,
     })
 }
 
@@ -176,16 +220,28 @@ pub fn run_method(
         .enumerate()
         .map(|(idx, sub)| match method {
             Method::Aracne => aracne::reconstruct(sub, &prep.spectral.mim, params.epsilon),
-            Method::BayesHc => hc::reconstruct(
-                sub,
-                &data.cols,
-                &data.levels,
-                params.restart,
-                params.seed.wrapping_add(idx as u64),
-                params.max_iter,
-                params.iss,
-                params.maxp,
-            ),
+            Method::BayesHc => {
+                // Hill climbing scans candidate moves in *local* index order and
+                // keeps the first best one, and its restart perturbations draw
+                // local indices. With the subgraph in ascending global-column
+                // order, both depend on the input column order. Ordering the
+                // subgraph by node name makes the whole search a function of the
+                // variable *set* alone.
+                let mut ordered = sub.clone();
+                if !params.legacy_lrw {
+                    ordered.sort_by(|&x, &y| data.names[x].cmp(&data.names[y]));
+                }
+                hc::reconstruct(
+                    &ordered,
+                    &data.cols,
+                    &data.levels,
+                    params.restart,
+                    params.seed.wrapping_add(idx as u64),
+                    params.max_iter,
+                    params.iss,
+                    params.maxp,
+                )
+            }
         })
         .collect();
 

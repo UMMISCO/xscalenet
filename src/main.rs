@@ -25,6 +25,7 @@
 //!   --atc-col NAME                annotation column to propagate (default: col 2)
 //!   --theme-network               build the multi-layer theme-proximity network
 //!   --json                        also export graph.json (nodes+metrics+edges+theme layer)
+//!   --legacy-lrw                  reproduce the pre-fix, column-order-dependent spectral step
 
 use std::path::PathBuf;
 use std::process::exit;
@@ -66,7 +67,7 @@ fn parse_args() -> Result<Args, String> {
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
              [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
              [--atc-col NAME] [--theme-network] [--json] [--scale-free] \
-             [--iterative-eigen]",
+             [--iterative-eigen] [--legacy-lrw]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));
     }
@@ -96,6 +97,7 @@ fn parse_args() -> Result<Args, String> {
         iss: 1.0,
         maxp: usize::MAX,
         iterative_eigen: false,
+        legacy_lrw: false,
     };
 
     let mut i = 3;
@@ -127,6 +129,7 @@ fn parse_args() -> Result<Args, String> {
             "--json" => json = true,
             "--scale-free" => scale_free = true,
             "--iterative-eigen" => params.iterative_eigen = true,
+            "--legacy-lrw" => params.legacy_lrw = true,
             "--methods" => {
                 methods = value()?
                     .split(',')
