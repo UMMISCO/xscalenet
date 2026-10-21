@@ -68,7 +68,7 @@ fn encode_labels(labels: &[u8]) -> (Vec<u32>, u32) {
     let mut ids: Vec<u8> = labels.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    ids.sort_by(|&a, &b| label_str(a).cmp(&label_str(b)));
+    ids.sort_by_key(|&a| label_str(a));
     // Labels are small u8s -> a flat table beats a hash map over millions of cells.
     let mut code_of = [0u32; 256];
     for (c, &id) in ids.iter().enumerate() {

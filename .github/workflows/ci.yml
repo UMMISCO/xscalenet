@@ -49,7 +49,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned on purpose. Clippy gains lints with every release, so running it
+      # on `stable` means a toolchain bump can turn this job red on code nobody
+      # touched -- which is how a gate stops being trusted. Bump this
+      # deliberately, with the fixes in the same commit. Reproduce locally with
+      #   rustup toolchain install 1.99 && cargo +1.99 clippy --release --all-targets
+      - uses: dtolnay/rust-toolchain@1.99
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2

@@ -128,11 +128,12 @@ pub fn compute(
     // Iterative fast path: only usable when k is fixed (`eigen_perc`), since the
     // elbow needs the full spectrum. Returns `None` if it did not converge, in
     // which case we fall back to the exact dense solver below.
-    let iter_result = if iterative && eigen_perc.is_some() {
-        let k = ((eigen_perc.unwrap() * ncol_all as f64).ceil() as usize).clamp(2, q);
-        crate::lanczos::smallest_eigenpairs(&m, k, seed).map(|(vals, vecs)| (vals, vecs, k))
-    } else {
-        None
+    let iter_result = match eigen_perc {
+        Some(perc) if iterative => {
+            let k = ((perc * ncol_all as f64).ceil() as usize).clamp(2, q);
+            crate::lanczos::smallest_eigenpairs(&m, k, seed).map(|(vals, vecs)| (vals, vecs, k))
+        }
+        _ => None,
     };
 
     let (eigenvalues, mut eigenvectors, k) = if let Some(r) = iter_result {
