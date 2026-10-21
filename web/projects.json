@@ -1,6 +1,14 @@
 {
  "projects": [
   {
+   "id": "demo",
+   "title": "pop2mat demo reconstruction",
+   "domain": "reference",
+   "graph": "demo.graph.json",
+   "color_by": "community",
+   "note": "45 variables reconstructed from the bundled tests/data/pop2mat.txt fixture (aracne + bayes_hc, presFreq 0.3). Carries the spectral subgraphs, so the coverage heatmap works. Regenerate with: curl -X POST localhost:8788/run -F data=@tests/data/pop2mat.txt -F methods=aracne,bayes_hc -F thresh=0.3 -o web/demo.graph.json"
+  },
+  {
    "id": "testnet",
    "title": "ATC 10-node reference",
    "domain": "reference",
@@ -14,7 +22,7 @@
    "domain": "e-commerce",
    "graph": "amazon.graph.json",
    "color_by": "group",
-   "note": "Products co-purchased; group (Book/Music/DVD/Video) \u2192 category hierarchy. On the cat2 functional layer, Louvain guilds separate music genres / book subjects / video."
+   "note": "Products co-purchased; group (Book/Music/DVD/Video) → category hierarchy. On the cat2 functional layer, Louvain guilds separate music genres / book subjects / video."
   },
   {
    "id": "flickr",
@@ -22,7 +30,7 @@
    "domain": "social / image",
    "graph": "flickr.graph.json",
    "color_by": "tag",
-   "note": "Photos sharing context; each photo's dominant MIR tag (sky / nikon / portrait \u2026) as its annotation."
+   "note": "Photos sharing context; each photo's dominant MIR tag (sky / nikon / portrait …) as its annotation."
   },
   {
    "id": "scapis",
@@ -30,7 +38,7 @@
    "domain": "microbiome",
    "graph": "scapis2417.graph.json",
    "color_by": "phylum",
-   "note": "2417 MSP, GTDB 220 taxonomy + MSP functional traits. Client data \u2014 not bundled in the repo.",
+   "note": "2417 MSP, GTDB 220 taxonomy + MSP functional traits. Client data — not bundled in the repo.",
    "client_data": true
   }
  ]
