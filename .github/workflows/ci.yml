@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Warnings are errors here. The crate builds clean under this on every feature
+  # combination below, so a new one means something actually regressed.
   RUSTFLAGS: -D warnings
 
 jobs:
@@ -19,48 +21,40 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install the stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry and build output
-        uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --release
 
       # The regression suite pins numerical fidelity against the original R
       # package's fixtures, and tests/order_invariance.rs pins that renaming or
-      # reordering the input columns leaves the network unchanged. Both are
-      # cheap -- the whole suite is about a second -- so they gate every push.
+      # reordering the input columns leaves the network unchanged. The whole
+      # suite is about a second, so it gates every push.
       - name: Test
         run: cargo test --release
 
       # The server and the wasm module are separate feature combinations and
-      # have broken independently before; building them here keeps that honest.
+      # have broken independently before -- the wasm one as recently as the
+      # commit that added this workflow.
       - name: Build the local server (--features web)
         run: cargo build --release --features web --bin xscalenet-web
 
       - name: Type-check the wasm feature
         run: cargo check --lib --no-default-features --features wasm
 
-  lint:
-    name: lint (advisory)
+  clippy:
+    name: clippy
     runs-on: ubuntu-latest
-    # Advisory, not gating. The codebase predates both tools: `cargo fmt
-    # --check` does not pass, and clippy reports warnings in code untouched by
-    # recent work. Making these gate means reformatting the crate and clearing
-    # those warnings first -- worth doing, but as its own change rather than
-    # silently inside a CI commit.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Clippy
-        run: cargo clippy --release --all-targets
-      - name: Formatting
-        run: cargo fmt --check
+      - run: cargo clippy --release --all-targets
+
+  # Deliberately no `cargo fmt --check`: the crate has never been
+  # rustfmt-formatted, and running it would rewrite 24 files. Worth doing, but
+  # as its own change rather than hidden inside an unrelated pull request.

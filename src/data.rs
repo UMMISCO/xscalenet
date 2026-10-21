@@ -27,6 +27,10 @@ pub struct Dataset {
     pub nrow: usize,
 }
 
+/// What [`Dataset::parse_tsv_raw`] hands back: the header names, the columns as
+/// borrowed slices of the input text, and the row count.
+pub type RawColumns<'a> = (Vec<String>, Vec<Vec<&'a str>>, usize);
+
 impl Dataset {
     pub fn ncol(&self) -> usize {
         self.names.len()
@@ -47,7 +51,7 @@ impl Dataset {
     /// Parse a TSV into (names, column-major cells as string **slices** into the
     /// input, nrow) without encoding. The slices are zero-copy borrows of `text`,
     /// so parsing a large matrix does not allocate per cell.
-    pub fn parse_tsv_raw(text: &str) -> Result<(Vec<String>, Vec<Vec<&str>>, usize), String> {
+    pub fn parse_tsv_raw(text: &str) -> Result<RawColumns<'_>, String> {
         let mut lines = text.lines();
         // Header = first non-blank line (skip only leading blank lines). Data
         // rows are NOT filtered: an empty field is a valid NA cell, so blank rows

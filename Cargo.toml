@@ -32,6 +32,14 @@ web = ["parallel", "graphjson", "dep:axum", "dep:tokio", "dep:tower-http"]
 # Build with: `cargo build --lib --no-default-features --features wasm --target wasm32-unknown-unknown`.
 wasm = ["graphjson", "dep:wasm-bindgen"]
 
+# The numerical core walks several parallel arrays with one shared index -- the
+# MI matrix and its degree vector, an eigenvector and its node names, a
+# configuration and its previous step. Clippy's iterator rewrite handles one
+# array at a time, so applying it here would split those loops apart and hide
+# the fact that the index is the same. Allowed deliberately, not by neglect.
+[lints.clippy]
+needless_range_loop = "allow"
+
 [dependencies]
 nalgebra = "0.33"
 rayon = { version = "1.10", optional = true }

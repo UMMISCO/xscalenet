@@ -54,16 +54,16 @@ fn main() {
             let v = nd[field].as_str().unwrap_or("NA").to_string();
             *freq.entry(v).or_default() += 1;
         }
-        let mut gs: Vec<String> = freq.keys().cloned().filter(|s| !is_missing(s)).collect();
+        let mut gs: Vec<String> = freq.keys().filter(|&s| !is_missing(s)).cloned().collect();
         gs.sort_by_key(|k| std::cmp::Reverse(freq[k]));
         let pal = ["#2f6df6","#3fb950","#db6d28","#a371f7","#e3b341","#e5534b","#39c5cf","#db61a2"];
         let cs = (0..gs.len()).map(|i| pal[i % pal.len()].to_string()).collect();
         (gs, cs)
     };
-    let theme_idx: std::collections::HashMap<&String, usize> =
-        themes.iter().enumerate().map(|(i, t)| (t, i)).collect();
+    let theme_idx: std::collections::HashMap<&str, usize> =
+        themes.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
     let labels: Vec<Option<usize>> = nodes.iter()
-        .map(|nd| theme_idx.get(&nd[field].as_str().unwrap_or("NA").to_string()).copied())
+        .map(|nd| theme_idx.get(nd[field].as_str().unwrap_or("NA")).copied())
         .collect();
 
     // ---- graph from edges ---------------------------------------------------
