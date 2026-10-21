@@ -193,8 +193,8 @@ pub fn compute(
         for c in 0..k {
             let col: Vec<f64> = (0..q).map(|r| eigenvectors[r][c]).collect();
             if canonical_sign(&col, &node_names) < 0.0 {
-                for r in 0..q {
-                    eigenvectors[r][c] = -eigenvectors[r][c];
+                for row in eigenvectors.iter_mut() {
+                    row[c] = -row[c];
                 }
             }
         }

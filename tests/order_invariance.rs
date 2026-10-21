@@ -62,15 +62,15 @@ fn synthetic() -> Dataset {
         .collect();
     let mut cols: Vec<Vec<u32>> = Vec::with_capacity(p);
     let mut names: Vec<String> = Vec::with_capacity(p);
-    for b in 0..blocks {
+    for (b, latent) in latents.iter().enumerate() {
         for v in 0..per_block {
             let flip = 5 + 2 * v as u64; // 5%..27% disagreement with the latent
             let col: Vec<u32> = (0..nrow)
                 .map(|i| {
                     if next() % 100 < flip {
-                        1 - latents[b][i]
+                        1 - latent[i]
                     } else {
-                        latents[b][i]
+                        latent[i]
                     }
                 })
                 .collect();
