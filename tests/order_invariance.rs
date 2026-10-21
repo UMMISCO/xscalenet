@@ -38,7 +38,7 @@ fn params(legacy: bool) -> Params {
 fn shipped_params() -> Params {
     Params {
         restart: 0,
-        hc_orders: 400,
+        hc_orders: 24,
         hc_order_freq: 0.0,
         ..params(false)
     }
@@ -151,32 +151,38 @@ fn aracne_edges_are_rename_invariant() {
     }
 }
 
-/// A single ordering is reproducible but *not* invariant — this pins the
-/// distinction the README documents, so nobody mistakes 0.2 for a fix.
+/// The base ordering of each subgraph is derived from the variables' own data,
+/// not from their names or column positions, so invariance does not rest on
+/// Monte-Carlo averaging: even a *single* ordering is already invariant to both
+/// renaming and reordering. The ordering consensus on top of it is a robustness
+/// knob — it stops the result depending on one arbitrary scan order — not the
+/// mechanism that provides invariance.
+///
+/// Ordering by name (xscalenet 0.2) is invariant to column order but not to
+/// renaming; ordering by column position is the reverse. Only a data-derived
+/// order escapes both, because names and positions are equally arbitrary labels.
 #[test]
-fn single_ordering_is_reproducible_but_not_rename_invariant() {
+fn one_ordering_is_already_rename_and_order_invariant() {
     let data = synthetic();
-    let one = Params { hc_orders: 1, ..params(false) };
-
-    assert_eq!(
-        edge_names_with(&data, Method::BayesHc, &one),
-        edge_names_with(&data, Method::BayesHc, &one),
-        "a single ordering should at least be reproducible"
-    );
-
+    let one = Params { hc_orders: 1, restart: 0, ..params(false) };
     let base = edge_names_with(&data, Method::BayesHc, &one);
-    let mut any_differs = false;
+    assert!(!base.is_empty(), "no hill-climbing edges to compare");
+
     for seed in [7u64, 99, 4242, 5, 61] {
         let (rd, back) = rename(&data, seed);
-        if back_mapped(&rd, Method::BayesHc, &one, &back) != base {
-            any_differs = true;
-        }
+        assert_eq!(
+            back_mapped(&rd, Method::BayesHc, &one, &back),
+            base,
+            "renaming changed the network with a data-canonical base order (seed {seed})"
+        );
+        let perm = permutation(data.ncol(), seed);
+        let pd = permute(&data, &perm);
+        assert_eq!(
+            edge_names_with(&pd, Method::BayesHc, &one),
+            base,
+            "permuting columns changed the network with a data-canonical base order (seed {seed})"
+        );
     }
-    assert!(
-        any_differs,
-        "single-ordering hill climbing is unexpectedly rename-invariant; if this \
-         became true the README's reproducible-but-not-invariant note is stale"
-    );
 }
 
 fn pop2mat() -> Dataset {

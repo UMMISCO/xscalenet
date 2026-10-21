@@ -235,14 +235,31 @@ pub fn run_method(
                 // order, both depend on the input column order. Ordering the
                 // subgraph by node name makes the whole search a function of the
                 // variable *set* alone.
+                // Canonical base order, derived from the DATA rather than from
+                // any label. Sorting the subgraph's variables by their own
+                // level-code vector is invariant to renaming (the data does not
+                // move) *and* to column permutation (the sorted sequence is the
+                // same), so the orderings sampled below are identical in both
+                // cases and the invariance is exact rather than statistical.
+                //
+                // Ordering by name instead (xscalenet 0.2) is invariant to
+                // column order but not to renaming; ordering by column position
+                // is the reverse. Only a data-derived order escapes both,
+                // because names and positions are equally arbitrary labels.
+                // Columns with identical data are genuinely interchangeable and
+                // fall back to the name — the duplicate-variable caveat the run
+                // already warns about.
                 let mut ordered = sub.clone();
                 if !params.legacy_lrw {
-                    ordered.sort_by(|&x, &y| data.names[x].cmp(&data.names[y]));
+                    ordered.sort_by(|&x, &y| {
+                        data.cols[x]
+                            .cmp(&data.cols[y])
+                            .then_with(|| data.names[x].cmp(&data.names[y]))
+                    });
                 }
                 // The subgraph index is itself order- and name-invariant (it
                 // comes from the eigenvector rank and the canonical G+/G- sign),
-                // so seeding the orderings from it keeps them reproducible
-                // without reintroducing a dependence on the input layout.
+                // so seeding the orderings from it keeps them reproducible.
                 let orders = if params.legacy_lrw { 1 } else { params.hc_orders };
                 hc::reconstruct(
                     &ordered,

@@ -26,18 +26,22 @@
 //!   --theme-network               build the multi-layer theme-proximity network
 //!   --json                        also export graph.json (nodes+metrics+edges+theme layer)
 //!   --legacy-lrw                  reproduce the pre-fix, column-order-dependent spectral step
-//!   --hc-orders 400               random variable orderings fused per subgraph (hill climbing)
+//!   --hc-orders 200               random variable orderings fused per subgraph (hill climbing)
 //!   --hc-order-freq 0.0           drop arcs seen in fewer than this fraction of orderings
 //!   (with --hc-orders > 1, --restart defaults to 0 unless given: see parse_args)
 
 use std::path::PathBuf;
 use std::process::exit;
 
-/// Random variable orderings fused per subgraph by the Bayesian step. Chosen so
-/// that renaming or reordering the input columns changes the network by less
-/// than 2% (edge Jaccard >= 0.98) on the reference matrices; smaller values are
-/// cheaper but measurably less reproducible (R = 24 gives only ~0.92-0.96).
-const HC_ORDERS_DEFAULT: usize = 400;
+/// Random variable orderings fused per subgraph by the Bayesian step.
+///
+/// This is a *robustness* knob, not the source of label-invariance: the base
+/// order is already derived from the variables' own data (see
+/// `scalenet::run_method`), so renaming or reordering the input gives an
+/// identical network at any count. Fusing several orderings additionally stops
+/// the result resting on one arbitrary scan order, at the price of ordinary
+/// Monte-Carlo variation with the seed.
+const HC_ORDERS_DEFAULT: usize = 200;
 
 use xscalenet::analysis;
 use xscalenet::data::Dataset;
@@ -76,7 +80,7 @@ fn parse_args() -> Result<Args, String> {
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
              [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
              [--atc-col NAME] [--theme-network] [--json] [--scale-free] \
-             [--iterative-eigen] [--legacy-lrw] [--hc-orders 400] \
+             [--iterative-eigen] [--legacy-lrw] [--hc-orders 200] \
              [--hc-order-freq 0.0]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));

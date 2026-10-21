@@ -9,48 +9,64 @@ hill-climbing moves in node-name order. That is reproducible but **not
 invariant**: the network stayed a function of an arbitrary ordering, now
 alphabetical, so renaming variables while keeping the data identical moved edges
 (rename Jaccard 0.65–0.93 on the four reference matrices). In a study where a
-taxonomic update renames a genus, that path changes results.
+taxonomic update renames a genus, that path changes results. Ordering by column
+position instead is the mirror image — invariant to renaming, dependent on column
+order. Names and positions are equally arbitrary labels, so neither escapes.
 
-The Bayesian step now runs each subgraph under `--hc-orders` **random** variable
-orderings and fuses them. Hill climbing keeps the first best-scoring move it
-finds, so the visit order decides every tie; averaging over random orders removes
-the dependence on any particular one. The orderings are drawn from `--seed` and
-the subgraph index — both invariant to names and column positions — so the result
-is invariant to renaming and reordering up to Monte-Carlo error.
+The base order of each subgraph is now derived from **the variables' own data**:
+they are sorted by their level-code vector, ties (identical columns, which are
+interchangeable anyway) falling back to the name. Renaming leaves the data where
+it is, and permuting columns leaves the sorted sequence unchanged, so both produce
+the same ordering and the invariance is **exact, not statistical** — edge Jaccard
+**1.0000** for renaming and for permutation, on all four reference matrices, for
+every ordering count including 1.
+
+### Added: ordering consensus
+
+On top of that canonical base, `--hc-orders` (default **200**) random variable
+orderings are fused per subgraph, so the network does not rest on one arbitrary
+scan order either. Hill climbing keeps the first best-scoring move it finds, so
+the visit order decides every tie and steers the greedy path; `climb()` now takes
+the scan order as an argument instead of iterating `0..m`, which also lets one
+BDeu cache be shared across all orderings. The orderings are seeded from `--seed`
+and the subgraph index, neither of which depends on the input layout.
+
+This count is a **robustness** knob, not the source of invariance. Renaming and
+reordering are exact at any value; only seed reproducibility moves with it
+(0.90–0.93 at 24, 0.98–1.00 at 200, measured on the reference matrices). The
+README tabulates it against runtime.
 
 **How the votes are fused.** Each arc votes with the fraction of orderings that
 inferred it, and those fractional votes go into the *existing* presence-frequency
-consensus (`SubEdge::weight`, summed by `gather`). The alternative — thresholding
-within each subgraph and casting a binary vote — was measured and rejected: it
-puts a knife edge at the threshold where the ordering-frequency distribution is
-densest, and it was consistently less reproducible. Fractional voting also keeps
-`--thresh` meaning exactly what it did ("the share of local reconstructions that
-found this edge"), only estimated from a soft vote rather than from one
-tie-break, and it degrades to the old binary vote at `--hc-orders 1`. ARACNE
-votes 1.0 and so is bit-identical to before, which the golden fixtures confirm.
+consensus (`SubEdge::weight`, summed by `gather`, which now accumulates `f64`).
+The alternative — thresholding within each subgraph and casting a binary vote —
+was measured and rejected: it puts a knife edge at the threshold where the
+ordering-frequency distribution is densest, and was consistently less
+reproducible. Fractional voting also keeps `--thresh` meaning exactly what it did
+("the share of local reconstructions that found this edge"), only estimated from
+a soft vote rather than from one tie-break, and it degrades to the old binary vote
+at `--hc-orders 1`. ARACNE votes 1.0 and so is bit-identical to before, which the
+golden fixtures confirm.
 
-### Added
-
-* `--hc-orders` (default **400**) and `--hc-order-freq` (default `0.0`, a noise
-  floor). 400 clears a 2 % edge difference under renaming and reordering on the
-  reference matrices; the README tabulates reproducibility and runtime against
-  the ordering count. The wasm build defaults to 24, since it is single-threaded.
-* `SubEdge::weight` — how strongly a subgraph votes for an edge. `gather`
-  accumulates `f64` votes instead of integer counts.
-* Tests: rename-invariance for both methods at the shipped defaults, and a guard
-  that single-ordering hill climbing is reproducible but *not* rename-invariant,
-  so the distinction the README draws cannot go stale.
+* `--hc-order-freq` (default `0.0`) is a noise floor: arcs seen in fewer than this
+  fraction of orderings contribute nothing.
+* `SubEdge::weight` — how strongly a subgraph votes for an edge.
+* Tests: rename-invariance for both methods, and that a *single* ordering is
+  already rename- and order-invariant thanks to the data-canonical base — which
+  pins the distinction between that base and 0.2's name-ordered one.
 
 ### Changed
 
-* **`--restart` now defaults to 0 when `--hc-orders > 1`.** Restarts and
-  orderings both diversify the greedy search; under consensus the restarts are
-  redundant and actively harmful — 21 restarts alongside 400 orderings *lowered*
-  rename reproducibility (0.974–0.978 vs 0.988–0.995) and doubled the runtime,
-  because each restart adds variation that is never averaged. An explicit
-  `--restart` is honoured, and `--hc-orders 1` or `--legacy-lrw` keeps 21.
+* **`--restart` defaults to 0 when `--hc-orders > 1`.** Restarts and orderings
+  both diversify the greedy search; under consensus the restarts are redundant and
+  actively harmful — measured at 400 orderings, keeping 21 restarts *lowered*
+  rename reproducibility (0.974–0.978 vs 0.988–0.995, back when invariance was
+  still statistical) and doubled the runtime, because each restart adds variation
+  that is never averaged. An explicit `--restart` is honoured, and `--hc-orders 1`
+  or `--legacy-lrw` keeps 21.
+* The wasm build defaults to 24 orderings, since it is single-threaded.
 * **Results differ from 0.2.** `--legacy-lrw` still reproduces 0.1.x exactly: it
-  forces a single ordering and the published restart count.
+  forces a single ordering, the column-order base, and the published restart count.
 
 ## 0.2.0 — unreleased
 
