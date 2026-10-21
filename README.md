@@ -8,7 +8,7 @@ A fast, dependency-light Rust implementation of the [ScaleNet](https://github.co
 spectral framework and its **Spectral Consensus Strategy**, with a browser for
 exploring what comes out.
 
-[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](#license)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021_edition-dea584.svg?logo=rust&logoColor=white)](Cargo.toml)
 [![Validated against R](https://img.shields.io/badge/validated_against-R_ScaleNet-276DC3.svg?logo=r&logoColor=white)](docs/r-mapping.md)
 [![Layout invariant](https://img.shields.io/badge/reconstruction-layout_invariant-3fb950.svg)](tests/order_invariance.rs)
@@ -288,4 +288,4 @@ ATC and the two-layer model: Prifti et al., *Bioinformatics* 2010 and 2008.
 
 ## License
 
-GPL-3.0-or-later, as declared in [`Cargo.toml`](Cargo.toml).
+GPL-3.0-or-later. See [LICENSE](LICENSE).
