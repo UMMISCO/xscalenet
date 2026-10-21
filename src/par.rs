@@ -5,6 +5,11 @@
 //! default builds use real Rayon (via `rayon::prelude`) and are unaffected, so
 //! the numerics stay byte-identical; only the *scheduling* changes here.
 #![cfg(not(feature = "parallel"))]
+// This module mirrors a slice of the Rayon API so the rest of the crate
+// compiles unchanged with `parallel` off. Which of those methods a given build
+// actually calls depends on the feature set, so an unused one here is the shim
+// doing its job, not dead code to delete.
+#![allow(dead_code)]
 
 /// `into_par_iter()` → sequential `into_iter()` (ranges, `Vec`, …).
 pub trait IntoParIter: IntoIterator + Sized {
