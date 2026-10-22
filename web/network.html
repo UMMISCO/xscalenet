@@ -2303,13 +2303,26 @@ addEventListener("resize",()=>{ resize(); if(G){ fitView(); render(); }});
 
 resize();
 if(location.protocol.startsWith("http")){
-  const gfile=new URLSearchParams(location.search).get("graph")||"scapis.graph.json";
+  // Default to the bundled demo. It used to be scapis.graph.json, which is
+  // client data and gitignored, so a fresh clone served over http asked for a
+  // file that is not in the repository and landed on "No graph loaded".
+  const gfile=new URLSearchParams(location.search).get("graph")||"demo.graph.json";
   stateKey=gfile;
   fetch(gfile).then(r=>r.ok?r.json():Promise.reject())
     .then(g=>{ resize(); loadBase(g); })
-    .catch(()=>{ $("#badge").innerHTML='<b>No graph loaded.</b> <span class="m">Use “Load graph.json”. The SCAPIS demo (<code>scapis.graph.json</code>) is client data and is not bundled in the repo.</span>'; });
+    .catch(()=>{ $("#badge").innerHTML='<b>Could not load <code>'+esc(gfile)+'</code>.</b><br><span class="m">Some bundled networks are client data and are not in the repository — see <code>project/</code> to generate them. Or use “Load graph.json”.</span>'; });
 } else {
-  $("#badge").innerHTML='<b>Open over http to auto-load a bundled graph.</b><br><span class="m">e.g. <code>cd web &amp;&amp; python3 -m http.server</code>, or use “Load graph.json”.</span>';
+  // Opened from the filesystem. Browsers block fetch() on the file:// origin, so
+  // nothing can load — and the toolbar still looks alive, which reads as "broken"
+  // rather than "wrong origin". Say exactly that, and give the command that also
+  // enables Import, rather than the static server which cannot reconstruct.
+  $("#badge").innerHTML=
+    '<b>Opened from the filesystem — nothing can load.</b><br>'+
+    '<span class="m">Browsers block <code>fetch()</code> on <code>file://</code>, so the page cannot read any graph. '+
+    'Serve the folder over http instead:</span><br>'+
+    '<code style="display:inline-block;margin-top:5px">cargo run --release --features web --bin xscalenet-web</code><br>'+
+    '<span class="m">then open <code>http://localhost:8788/network.html</code> — that also enables “Import data”. '+
+    'A plain <code>python3 -m http.server</code> works too, but cannot reconstruct.</span>';
 }
 </script>
 </body>
