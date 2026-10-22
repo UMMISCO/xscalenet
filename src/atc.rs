@@ -98,10 +98,10 @@ pub fn membership_from_labels(labels: &[Option<usize>], n_themes: usize) -> Vec<
         .iter()
         .map(|&l| {
             let mut row = vec![0.0f64; n_themes];
-            if let Some(t) = l {
-                if t < n_themes {
-                    row[t] = 1.0;
-                }
+            if let Some(t) = l
+                && t < n_themes
+            {
+                row[t] = 1.0;
             }
             row
         })

@@ -1,7 +1,7 @@
 [package]
 name = "xscalenet"
 version = "0.3.0"
-edition = "2021"
+edition = "2024"
 description = "Efficient Rust reimplementation of the ScaleNet network reconstruction + Spectral Consensus Strategy (core path)"
 license = "GPL-3.0-or-later"
 

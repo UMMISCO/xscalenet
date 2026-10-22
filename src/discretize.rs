@@ -395,7 +395,7 @@ fn pam(x: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             medoids
                 .iter()
                 .enumerate()
-                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
+                .min_by(|&(_, &a), &(_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
                 .map(|(pos, _)| pos)
                 .unwrap()
         })
@@ -609,7 +609,7 @@ fn pam_w(x: &[f64], w: &[f64], k: usize) -> (Vec<usize>, Vec<usize>) {
             medoids
                 .iter()
                 .enumerate()
-                .min_by(|(_, &a), (_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
+                .min_by(|&(_, &a), &(_, &b)| dist(x[i], x[a]).total_cmp(&dist(x[i], x[b])))
                 .map(|(pos, _)| pos)
                 .unwrap()
         })

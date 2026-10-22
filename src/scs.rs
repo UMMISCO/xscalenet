@@ -134,10 +134,10 @@ pub fn consensus(
             }
 
             // ecorr: last method (in order) that inferred this edge wins.
-            if let Some(rec) = el.get(idx) {
-                if !rec.ecorr.is_nan() {
-                    ecorr = rec.ecorr;
-                }
+            if let Some(rec) = el.get(idx)
+                && !rec.ecorr.is_nan()
+            {
+                ecorr = rec.ecorr;
             }
         }
 
