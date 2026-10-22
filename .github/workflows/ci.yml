@@ -44,6 +44,28 @@ jobs:
       - name: Type-check the wasm feature
         run: cargo check --lib --no-default-features --features wasm
 
+      # web/wasm/xscalenet_bg.wasm is a committed binary that the frontend loads
+      # whenever no local server is running -- and it had silently gone stale by
+      # seven commits, so the browser-only path was reconstructing with the
+      # pre-fix, column-order-dependent engine while every other path had been
+      # fixed. Nothing pointed that out. This does: if any commit touching src/
+      # is newer than the last commit that refreshed the artefact, the build
+      # needs ./scripts/build-wasm.sh re-run and the result committed.
+      - name: Check the committed wasm is not stale
+        if: runner.os == 'Linux'
+        run: |
+          src_commit=$(git log -1 --format=%H -- src/)
+          wasm_commit=$(git log -1 --format=%H -- web/wasm/xscalenet_bg.wasm)
+          if ! git merge-base --is-ancestor "$src_commit" "$wasm_commit"; then
+            echo "::error::web/wasm/xscalenet_bg.wasm predates the engine it ships."
+            echo "  last src/ change:  $(git log -1 --format='%h %ad %s' --date=short -- src/)"
+            echo "  last wasm rebuild: $(git log -1 --format='%h %ad %s' --date=short -- web/wasm/xscalenet_bg.wasm)"
+            echo "  fix: ./scripts/build-wasm.sh release && git add web/wasm"
+            exit 1
+          fi
+          echo "wasm artefact is current with src/"
+
+
   clippy:
     name: clippy
     runs-on: ubuntu-latest
