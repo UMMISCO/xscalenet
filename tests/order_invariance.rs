@@ -551,7 +551,7 @@ fn louvain_is_deterministic() {
         m.modularity
     );
     // Each clique in one community, and the labels assigned in node order.
-    let expected: Vec<usize> = (0..k).flat_map(|c| std::iter::repeat(c).take(sz)).collect();
+    let expected: Vec<usize> = (0..k).flat_map(|c| std::iter::repeat_n(c, sz)).collect();
     let got: Vec<usize> = m.nodes.iter().map(|n| n.community).collect();
     assert_eq!(got, expected, "partition is not the committed one");
 
