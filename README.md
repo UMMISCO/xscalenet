@@ -8,7 +8,7 @@ A fast, dependency-light Rust implementation of the [ScaleNet](https://github.co
 spectral framework and its **Spectral Consensus Strategy**, with a browser for
 exploring what comes out.
 
-[![CI](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml/badge.svg?branch=modernize-and-benchmark)](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml)
+[![CI](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021_edition-dea584.svg?logo=rust&logoColor=white)](Cargo.toml)
 [![Validated against R](https://img.shields.io/badge/validated_against-R_ScaleNet-276DC3.svg?logo=r&logoColor=white)](docs/r-mapping.md)
