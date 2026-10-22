@@ -183,6 +183,9 @@
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
+// graph.json files are exchanged between people, so their strings are untrusted
+// input: escape anything from them before it reaches innerHTML.
+const esc=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NET = $("#net"), SVGNS = "http://www.w3.org/2000/svg";
 
 let G=null, nodes=[], edges=[], idx={}, themes=[], colors=[], trace=[];
@@ -206,7 +209,7 @@ function load(g){
   seedLayout(); relax(240);
   $("#scrub").max = Math.max(0, trace.length-1);
   const b=$("#badge");
-  if(G.meta?.title){ b.style.display=""; b.innerHTML=`<b>${G.meta.title}</b>`+
+  if(G.meta?.title){ b.style.display=""; b.innerHTML=`<b>${esc(G.meta.title)}</b>`+
     (trace.length?` <span class="m">· ${trace.length-1} propagation steps</span>`:""); }
   else b.style.display="none";
   render(); drawConv(); inspect(null);
@@ -364,7 +367,7 @@ function inspect(i){
       <span class="track"><span class="fill" style="width:${(100*share).toFixed(1)}%;background:${colors[j]}"></span></span>
       <span class="vv">${(row[j]).toFixed(3)}</span></div>`;
   }).join("");
-  box.innerHTML = `<h2>Node ${n.id} — weights at step ${step}</h2>`+
+  box.innerHTML = `<h2>Node ${esc(n.id)} — weights at step ${step}</h2>`+
     `<div class="pierow"></div><div class="themebar">${bars}</div>`+
     `<div style="margin-top:10px">${kv("mass (Σ weights)",tot.toFixed(4))}
       ${kv("degree", n.degree??deg(i))}

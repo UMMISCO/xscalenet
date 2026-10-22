@@ -499,3 +499,69 @@ fn legacy_path_stays_column_order_dependent() {
          reproduce the pre-fix behaviour exactly"
     );
 }
+
+/// Louvain used to return a different partition on every run: it picked a node's
+/// best community by iterating a `HashMap`, and coarsened the supergraph through
+/// another, and Rust seeds its hasher per process. Five identical runs on a
+/// 79-variable matrix gave 12, 13, 14, 14 and 12 communities, which silently
+/// moved `community`, both modular centralities, and every enrichment q-value.
+///
+/// The expected values below are committed on purpose. Comparing two calls in
+/// one process would not catch a regression -- they share a hasher seed -- so
+/// the guard has to be a fixed number the test process must reproduce.
+#[test]
+fn louvain_is_deterministic() {
+    use xscalenet::metrics::{self, Graph};
+    use xscalenet::network::{Edge, Network, NetworkKind, Orientation};
+
+    // A ring of four 6-cliques: an unambiguous planted partition, so the golden
+    // records that Louvain both converges and finds the right answer.
+    let (k, sz) = (4usize, 6usize);
+    let mut pairs = Vec::new();
+    for c in 0..k {
+        for i in 0..sz {
+            for j in (i + 1)..sz {
+                pairs.push((c * sz + i, c * sz + j));
+            }
+        }
+        pairs.push((c * sz, ((c + 1) % k) * sz + 1));
+    }
+    let net = Network {
+        kind: NetworkKind::Consensus,
+        edges: pairs
+            .into_iter()
+            .map(|(a, b)| Edge {
+                source: a.min(b),
+                target: a.max(b),
+                orientation: Orientation::Undirected,
+                presence_score: Some(1.0),
+                orient_score: None,
+                ecorr: Some(0.5),
+            })
+            .collect(),
+    };
+
+    let g = Graph::from_network(&net, k * sz, false);
+    let m = metrics::compute(&g);
+
+    assert_eq!(m.n_communities, 4, "planted partition not recovered");
+    assert!(
+        (m.modularity - 0.6875).abs() < 1e-12,
+        "modularity drifted: {} (expected 0.6875)",
+        m.modularity
+    );
+    // Each clique in one community, and the labels assigned in node order.
+    let expected: Vec<usize> = (0..k).flat_map(|c| std::iter::repeat(c).take(sz)).collect();
+    let got: Vec<usize> = m.nodes.iter().map(|n| n.community).collect();
+    assert_eq!(got, expected, "partition is not the committed one");
+
+    // And stable within the process too, which catches an accidental dependence
+    // on call order or on mutable state carried between calls.
+    for _ in 0..5 {
+        let again = metrics::compute(&Graph::from_network(&net, k * sz, false));
+        assert_eq!(
+            again.nodes.iter().map(|n| n.community).collect::<Vec<_>>(),
+            got
+        );
+    }
+}

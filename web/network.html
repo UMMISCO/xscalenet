@@ -360,6 +360,11 @@
 <script>
 "use strict";
 const $=s=>document.querySelector(s);
+// Everything below renders strings that come out of a loaded graph.json -- node
+// ids, labels, annotation values, column names, meta.title -- into innerHTML.
+// Those files are exchanged between collaborators, so they are untrusted input:
+// a node id of `<img src=x onerror=...>` used to execute. Escape on insertion.
+const esc=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const CV=$("#cv"), CTX=CV.getContext("2d");
 const SF=$("#sf"), SFX=SF.getContext("2d");
 let G=null, nodes=[], edges=[], idx={}, groups=[], gcolor={}, colorField="";
@@ -514,7 +519,7 @@ function taxonEnrichment(g, memberList, themes){
     "modular_betweenness","atc","atc_last","abundance","avg_abundance","node_size","found","annotated",
     // the declared hierarchy ranks — enriching a taxon for its own hierarchy is circular:
     ...HIER, ...(g.meta&&g.meta.ranks?g.meta.ranks:[])]);
-  const miss=v=>v==null||v===""||["NA","Unclassified","unclassified","unknown","Unknown"].includes(String(v));
+  const miss=v=>v==null||ATC_MISSING.includes(String(v));
   const keys=new Set(); g.nodes.forEach(n=>Object.keys(n).forEach(k=>keys.add(k)));
   const fields=[];
   for(const k of keys){ if(BLOCK.has(k)) continue;
@@ -723,7 +728,10 @@ function atcCompute(n, adj, t0, cfg){
   const atcLast=prev.map(r=>{ let t=0; for(let j=0;j<m;j++) t+=r[j]; return t; });
   return { atc:Array.from(atc), atcLast, coinertia:coin, iterations:iters,
            configs:cfg.captureTrace?cfgs:null, deltas:cfg.captureTrace?dels:null }; }
-const ATC_MISSING=["NA","Unclassified","unclassified","","unknown","Unknown"];
+// Must match `is_missing` in src/graphjson.rs exactly. If the two lists drift,
+// the engine and this page build different ATC theme axes and the recomputed
+// scores stop being comparable with the stored ones.
+const ATC_MISSING=["NA","Unclassified","unclassified","","unknown","Unknown","NaN","unannotated","Unannotated"];
 const atcMissing=v=>v==null||ATC_MISSING.includes(v);
 
 // ---------- FunNet functional layer (theme-proximity) — JS port of
@@ -844,7 +852,7 @@ function recomputeAtc(){
   setupSizeBy(true); setupProp();
   sizeBy="atc"; $("#sizeby").value="atc";
   $("#atcrecinfo").innerHTML=`↻ recomputed on <b>${nn}</b> nodes · ${VIS.edges.length} edges · `+
-    `${m} themes (${annField})${weighted?" · weighted":""} · ${res.iterations} steps`;
+    `${m} themes (${esc(annField)})${weighted?" · weighted":""} · ${res.iterations} steps`;
   // NB: don't call buildColors() here — it clears offGroups (legend exclusions),
   // which would re-admit the very contaminants we finalized the topology without.
   apply(); showInfo();
@@ -920,7 +928,7 @@ function load(g){
   const NOCOLOR=["id","label","color","gtdb","gtdb_classification"];
   for(const n of nodes) for(const k in n) if(typeof n[k]==="string" && !NOCOLOR.includes(k)) fields.add(k);
   const opts=[g.meta?.color_by, ...fields].filter((v,i,a)=>v&&a.indexOf(v)===i);
-  $("#colorby").innerHTML=opts.map(o=>`<option>${o}</option>`).join("");
+  $("#colorby").innerHTML=opts.map(o=>`<option>${esc(o)}</option>`).join("");
   colorField=g.meta?.color_by||opts[0];
   $("#colorby").value=colorField;
 
@@ -993,8 +1001,8 @@ function load(g){
   if(q.get("atcrec")){ try{ recomputeAtc(); }catch(err){ console.error("ATC recompute failed:",err); } }
   render();
   const b=$("#badge");
-  b.style.display=""; b.innerHTML=`<b>${g.meta?.title||"network"}</b>`+
-    (g.meta?.source?`<br><span class="m">${g.meta.source}</span>`:"");
+  b.style.display=""; b.innerHTML=`<b>${esc(g.meta?.title||"network")}</b>`+
+    (g.meta?.source?`<br><span class="m">${esc(g.meta.source)}</span>`:"");
   updateFocusChip(); showInfo();
   restoring=false;   // from here on, user interactions persist
   // the scale-free canvas is drawn during load before the sidebar has laid out
@@ -1469,7 +1477,7 @@ function detectModules(){
     const bar=hasComp? `<div class="modbar">${comp.map(([p,c])=>
         `<span style="flex:${c};background:${compColor(p)}" title="${p}: ${c}"></span>`).join("")}</div>` : "";
     const e=enr[mid];
-    const sig = (e&&e.q<0.05) ? `<div class="modsig" title="Fisher over-representation, BH q=${e.q.toExponential(2)}">▲ ${e.val} <span>· ${e.field} · q=${fmtQ(e.q)}</span></div>` : "";
+    const sig = (e&&e.q<0.05) ? `<div class="modsig" title="Fisher over-representation, BH q=${e.q.toExponential(2)}">▲ ${esc(e.val)} <span>· ${e.field} · q=${fmtQ(e.q)}</span></div>` : "";
     const f=fsig[mid];
     const fsigHtml = f ? `<div class="modsig" style="color:var(--accent)" title="functional trait over-representation among member species (Fisher+BH)">▲ ${f.field}=${f.val==='1'?'+':f.val==='-1'?'−':f.val} <span>· ${f.a}/${f.nn} species · q=${fmtQ(f.q)}</span></div>` : "";
     return `<div class="modrow" onclick="focusModule('${mid}')" title="focus ${mid} · dominant ${groupName}: ${dom[0]} (${homog}%)">`+
@@ -1762,14 +1770,14 @@ CV.addEventListener("pointermove",ev=>{
   const tip=$("#tip");
   const place=()=>{ tip.style.display="block"; tip.style.left=Math.min(mx+14,stageW()-260)+"px"; tip.style.top=(my+14)+"px"; };
   if(h>=0){ const n=nodes[h]; place();
-    tip.innerHTML=`<div class="t">${n.label||n.id}</div>`+
+    tip.innerHTML=`<div class="t">${esc(n.label||n.id)}</div>`+
       row("phylum",n.phylum)+row("family",n.family)+row("genus",n.genus)+
       row("degree",VIS.deg[h])+ (n.abundance!=null?row("abundance",(+n.abundance).toExponential(2)):"")+
       (prop.step!=null && runAtcAt(h)!=null?row(`ATC @step ${prop.step}`, runAtcAt(h).toFixed(4)):(n.atc!=null?row("ATC",(+n.atc).toFixed(4)):""))+
       (prop.step!=null?row("theme mix", themeMix(h)):"");
     if(!selected.size) inspect(h,false);
   } else if(he){ place(); const dir=he.orient===1?'→':he.orient===-1?'←':'—';
-    tip.innerHTML=`<div class="t">${nodes[he.a].id} ${dir} ${nodes[he.b].id}</div>`+
+    tip.innerHTML=`<div class="t">${esc(nodes[he.a].id)} ${dir} ${esc(nodes[he.b].id)}</div>`+
       row(edgeLabel, `<span style="color:${edgeSigned&&he.w<0?COL.neg:COL.pos}">${edgeSigned&&he.w>=0?'+':''}${(+he.w).toFixed(3)}</span>`)+
       (he.score!=null?row("presence score",(+he.score).toFixed(3)):"")+
       (he.orient_score!=null?row("orient score",(+he.orient_score).toFixed(3)):"")+
@@ -1801,14 +1809,14 @@ function inspect(i, pinned){
     : (G.meta&&G.meta.color_by ? [G.meta.color_by] : []);
   const annSrc = (G.meta && G.meta.annotation_source) ? G.meta.annotation_source : (isTax ? "GTDB" : null);
   const contam = isTax && isContaminant(n);
-  let h=`<h2>${isTaxon?"Taxon":"Node"} — ${n.id}${pinned?' <span style="color:var(--accent)">◉</span>':''}${contam?pill("contaminant?","warn"):""}</h2>`;
-  if(n.label && !isTaxon && n.label!==n.id) h+=`<div style="margin:-2px 0 8px;font-style:italic;color:var(--muted)">${n.label}</div>`;
+  let h=`<h2>${isTaxon?"Taxon":"Node"} — ${esc(n.id)}${pinned?' <span style="color:var(--accent)">◉</span>':''}${contam?pill("contaminant?","warn"):""}</h2>`;
+  if(n.label && !isTaxon && n.label!==n.id) h+=`<div style="margin:-2px 0 8px;font-style:italic;color:var(--muted)">${esc(n.label)}</div>`;
   if(pinned) h+=nodeActions(i);
   // Enrichment (functional layer taxa)
   if(n.enr_list?.length){ h+=gh("Enrichment", pill("Fisher·BH","calc"))+
-    n.enr_list.map(e=>row(`▲ ${e.f}`, `${e.v==='1'?'+':e.v==='-1'?'−':e.v} ${U(e.a+'/'+e.nn+' · q='+fmtQ(e.q))}`)).join(""); }
+    n.enr_list.map(e=>row(`▲ ${esc(e.f)}`, `${e.v==='1'?'+':e.v==='-1'?'−':esc(e.v)} ${U(e.a+'/'+e.nn+' · q='+fmtQ(e.q))}`)).join(""); }
   // Annotation — the node's real annotation fields; uncertain values get an amber pill.
-  const miss=v=>v==null||v===""||["NA","Unclassified","unclassified","unknown","Unknown","NaN"].includes(String(v));
+  const miss=v=>v==null||ATC_MISSING.includes(String(v));
   const trow=k=>{ const v=n[k]; if(miss(v)) return "";
     return row(k, v, /(\bsp\.|unclassified|UBA|CAG-)/i.test(String(v))?pill("inferred","warn"):""); };
   h+=gh(isTax?"Taxonomy":"Annotation", annSrc?pill(annSrc):"")+
@@ -1905,7 +1913,7 @@ function inspectMulti(){
         `<div class="kv"><span class="k">path</span><b>${pathNodes.length-1} hops · x̄ ${edgeLabel} ${mean.toFixed(2)} · min ${minE.toFixed(2)}</b></div>`+
         `<div class="nbrs" style="margin-top:4px">`+pathNodes.map((i,k)=>
           `<div class="nbr" onclick="selectNode(${i},false)"><span class="dot" style="background:${colorOf(nodes[i])}"></span>`+
-          `<span class="nm">${nodes[i].id} <i>${nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||'')}</i></span>`+
+          `<span class="nm">${esc(nodes[i].id)} <i>${esc(nodes[i].genus&&nodes[i].genus!=='NA'?nodes[i].genus:(nodes[i].phylum||''))}</i></span>`+
           `${k<pathEcorrs.length?`<b style="color:${edgeSigned&&pathEcorrs[k]<0?COL.neg:COL.pos}">${edgeSigned&&pathEcorrs[k]>=0?'+':''}${(+pathEcorrs[k]).toFixed(2)}</b>`:''}</div>`).join("")+`</div>`;
     } else path=toggle+`<div class="hint" style="margin-top:6px">No path between them in the current (filtered) view.</div>`;
   }
@@ -1932,9 +1940,9 @@ function neighborList(i){
   const pos=nb.filter(x=>x.ec>=0).length, neg=nb.length-pos, cap=40;
   const rows=nb.slice(0,cap).map(x=>{ const m=nodes[x.j];
     const sub=(m.genus&&m.genus!=='NA')?m.genus:(m.phylum||m[GROUP_FIELD]||'');
-    return `<div class="nbr" onclick="selectNode(${x.j},false)" title="${(m.label||m.id).replace(/"/g,'')}">`+
+    return `<div class="nbr" onclick="selectNode(${x.j},false)" title="${esc(m.label||m.id)}">`+
       `<span class="dot" style="background:${colorOf(m)}"></span>`+
-      `<span class="nm">${m.id} <i>${sub}</i></span>`+
+      `<span class="nm">${esc(m.id)} <i>${esc(sub)}</i></span>`+
       `<b style="color:${edgeSigned&&x.ec<0?COL.neg:COL.pos}">${edgeSigned&&x.ec>=0?'+':''}${x.ec.toFixed(2)}</b></div>`; }).join("");
   return `<div class="nbrhead"><span>partners · ${edgeLabel}</span><span>${edgeSigned?`${nb.length} · ${pos}+ / ${neg}−`:nb.length}</span></div>`+
     `<div class="nbrs">${rows}</div>`+(nb.length>cap?`<div class="hint">+${nb.length-cap} more</div>`:"");
@@ -2002,7 +2010,7 @@ function themeMix(i){
   const row=trace[prop.step]?.config?.[i]; if(!row) return "—";
   const tot=row.reduce((a,b)=>a+b,0); if(tot<=1e-12) return "—";
   let bj=0; row.forEach((v,j)=>{ if(v>row[bj]) bj=j; });
-  return `${G.themes[bj]} ${Math.round(100*row[bj]/tot)}%`;
+  return `${esc(G.themes[bj])} ${Math.round(100*row[bj]/tot)}%`;
 }
 
 CV.addEventListener("pointerdown",ev=>{
@@ -2154,15 +2162,24 @@ document.addEventListener("click", ()=>{ $("#exportmenu").classList.remove("open
 $("#projbtn").onclick=e=>{ e.stopPropagation(); $("#projmenu").classList.toggle("open"); };
 $("#projmenu").onclick=e=>e.stopPropagation();
 (function loadProjects(){
-  fetch("projects.json").then(r=>r.ok?r.json():Promise.reject()).then(idx=>{
+  fetch("projects.json").then(r=>r.ok?r.json():Promise.reject()).then(async idx=>{
     const cur=new URLSearchParams(location.search).get("graph");
-    const items=(idx.projects||[]).map(p=>{
+    const projects=idx.projects||[];
+    // Several bundled networks are client data or too large to ship, so they are
+    // gitignored: they exist on the machine that generated them and 404 on a
+    // fresh clone. Probing each one keeps the menu honest in both directions --
+    // an entry lights up as soon as you generate it, and never advertises a
+    // network that is not there. `available:false` stays an explicit override.
+    const here=await Promise.all(projects.map(p=>
+      p.available===false ? false
+        : fetch(p.graph,{method:"HEAD"}).then(r=>r.ok).catch(()=>false)));
+    const items=projects.map((p,i)=>{
       const on = cur ? cur===p.graph : false;
-      const dim = p.available===false;
-      return `<button data-graph="${p.graph}" ${dim?'style="opacity:.5"':''} title="${(p.note||'').replace(/"/g,'&quot;')}">`+
+      const dim = !here[i];
+      return `<button data-graph="${esc(p.graph)}" ${dim?'style="opacity:.5" disabled':''} title="${esc(p.note||'')}">`+
         `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">`+
-        `<b>${on?'● ':''}${p.title}</b><span style="color:var(--muted);font-size:11px">${p.domain||''}</span></div>`+
-        `<div style="color:var(--muted);font-size:11px;margin-top:2px">${dim?'not generated — see project/'+p.id:p.note||''}</div></button>`;
+        `<b>${on?'● ':''}${esc(p.title)}</b><span style="color:var(--muted);font-size:11px">${esc(p.domain||'')}</span></div>`+
+        `<div style="color:var(--muted);font-size:11px;margin-top:2px">${esc(dim?'not generated — see project/'+p.id:p.note||'')}</div></button>`;
     }).join("");
     $("#projmenu").innerHTML = items || '<div style="padding:8px 10px;color:var(--muted);font-size:12px">no projects.json</div>';
     $("#projmenu").querySelectorAll("button[data-graph]").forEach(b=>b.onclick=()=>{
@@ -2194,7 +2211,7 @@ function renderSearch(){
     ? `<div class="r selall" style="border-bottom:1px solid var(--line2)" onclick="selectAllMatches()"><span class="dot" style="background:var(--accent)"></span><span><b>Select all ${searchAll.length} matches</b></span></div>` : "";
   box.innerHTML=head+searchHits.map((i,k)=>{ const n=nodes[i], sub=(n.genus&&n.genus!=='NA')?n.genus:(n.family||n.phylum||n.label||'');
     return `<div class="r ${k===searchHot?'hot':''}" data-i="${i}"><span class="dot" style="background:${colorOf(n)}"></span>`+
-      `<span>${n.id} <i>${sub}</i></span></div>`; }).join("")+
+      `<span>${esc(n.id)} <i>${esc(sub)}</i></span></div>`; }).join("")+
     (searchAll.length>12?`<div class="none">+${searchAll.length-12} more — use “Select all”.</div>`:"");
   box.classList.add("open");
   box.querySelectorAll(".r[data-i]").forEach(r=>r.onclick=()=>gotoNode(+r.dataset.i));

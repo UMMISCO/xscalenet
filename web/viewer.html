@@ -54,6 +54,9 @@
 <div id="tip"></div>
 <script>
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+// graph.json files are exchanged between people, so their strings are untrusted
+// input: escape anything from them before it reaches innerHTML.
+const esc=v=>String(v==null?"":v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const tip = document.getElementById('tip');
 let G=null, nodes=[], edges=[], idIndex={}, colorBy='community', sizeBy='atc', anim=null, dpr=1;
 
@@ -113,7 +116,7 @@ cv.addEventListener('mousemove', ev=>{
   const mx=ev.clientX-cv.getBoundingClientRect().left, my=ev.clientY-cv.getBoundingClientRect().top;
   let hit=null; for(const n of nodes){ if(Math.hypot(n.x-mx,n.y-my)<sizeOf(n)+2){hit=n;break;} }
   if(hit){ tip.style.display='block'; tip.style.left=(ev.clientX+12)+'px'; tip.style.top=(ev.clientY+12)+'px';
-    tip.innerHTML = `<b>${hit.id}</b>`;
+    tip.innerHTML = `<b>${esc(hit.id)}</b>`;
     document.getElementById('hover').innerHTML = ['community','annotation','degree','betweenness','clustering','atc','atc_last']
       .filter(k=>hit[k]!=null).map(k=>`<div><span class="k">${k}</span><b>${typeof hit[k]==='number'?(+hit[k]).toFixed(4):hit[k]}</b></div>`).join('');
   } else { tip.style.display='none'; }

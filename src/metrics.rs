@@ -407,7 +407,16 @@ fn louvain(g: &Graph) -> (Vec<usize>, f64) {
                 // best community by modularity gain
                 let mut best_c = cv;
                 let mut best_gain = w_to_cv - k[v] * comm_tot[cv] / two_m;
-                for (&c, &wc) in &w_to {
+                // Scan the candidate communities in a fixed order. Iterating
+                // `w_to` directly means iterating a HashMap, whose order is
+                // seeded per process, so two identical runs resolved
+                // near-ties -- the comparison carries a 1e-12 margin --
+                // differently and returned different partitions. Measured
+                // before this change: five identical runs on a 79-variable
+                // matrix gave 12, 13, 14, 14 and 12 communities.
+                let mut cands: Vec<(usize, f64)> = w_to.iter().map(|(&c, &wc)| (c, wc)).collect();
+                cands.sort_unstable_by_key(|&(c, _)| c);
+                for (c, wc) in cands {
                     let gain = wc - k[v] * comm_tot[c] / two_m;
                     if gain > best_gain + 1e-12 {
                         best_gain = gain;
@@ -454,9 +463,16 @@ fn louvain(g: &Graph) -> (Vec<usize>, f64) {
                 *new_adj[cv].entry(labels[u]).or_insert(0.0) += w;
             }
         }
+        // Same reason: the coarsened adjacency comes out of a HashMap, and its
+        // order decides the neighbour visit order of the next pass. Sort it so
+        // the whole coarsening is reproducible.
         super_adj = new_adj
             .into_iter()
-            .map(|hm| hm.into_iter().collect())
+            .map(|hm| {
+                let mut row: Vec<(usize, f64)> = hm.into_iter().collect();
+                row.sort_unstable_by_key(|&(u, _)| u);
+                row
+            })
             .collect();
         membership = new_membership;
     }

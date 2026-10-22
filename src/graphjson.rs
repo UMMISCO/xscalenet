@@ -19,10 +19,25 @@ pub const PALETTE: [&str; 12] = [
     "#7ee787", "#ffa657", "#79c0ff", "#d2a8ff",
 ];
 
+/// Values that mean "this node carries no annotation".
+///
+/// Kept in step with `ATC_MISSING` in `web/network.html`: the browser recomputes
+/// ATC on the visible subgraph, and if the two disagree about what counts as
+/// missing they build different theme axes and the recomputed scores are no
+/// longer the same quantity as the engine's. `"unannotated"` was in neither list
+/// despite being exactly that, so the bundled 10-node reference propagated over
+/// 3 themes in the engine and 4 in the browser.
 pub fn is_missing(s: &str) -> bool {
     matches!(
         s,
-        "NA" | "Unclassified" | "unclassified" | "" | "unknown" | "Unknown" | "NaN"
+        "NA" | "Unclassified"
+            | "unclassified"
+            | ""
+            | "unknown"
+            | "Unknown"
+            | "NaN"
+            | "unannotated"
+            | "Unannotated"
     )
 }
 fn round6(x: f64) -> f64 {
