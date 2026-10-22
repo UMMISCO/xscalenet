@@ -152,12 +152,16 @@ fn build_graph_json(
         eigen_perc: f.get("eigen_perc").and_then(|v| if v == "auto" || v.is_empty() { None } else { v.parse().ok() }),
         pres_freq_thresh: thresh,
         epsilon: num_f("epsilon", 0.001),
-        restart: num_u("restart", 21),
+        // Mirrors the CLI: ordering consensus subsumes the restarts.
+        restart: num_u("restart", if num_u("hc_orders", 200) > 1 { 0 } else { 21 }),
         seed: f.get("seed").and_then(|v| v.parse().ok()).unwrap_or(6196),
         max_iter: num_u("max_iter", 10_000),
         iss: num_f("iss", 1.0),
         maxp: f.get("maxp").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX),
         iterative_eigen: flag("iterative_eigen"),
+        legacy_lrw: flag("legacy_lrw"),
+        hc_orders: num_u("hc_orders", 200),
+        hc_order_freq: num_f("hc_order_freq", 0.0),
     };
 
     let config = RunConfig { methods, params };

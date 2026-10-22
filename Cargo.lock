@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "xscalenet"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "flate2",

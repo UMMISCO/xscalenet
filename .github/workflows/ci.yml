@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [modernize-and-benchmark, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Warnings are errors here. The crate builds clean under this on every feature
+  # combination below, so a new one means something actually regressed.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release
+
+      # The regression suite pins numerical fidelity against the original R
+      # package's fixtures, and tests/order_invariance.rs pins that renaming or
+      # reordering the input columns leaves the network unchanged. The whole
+      # suite is about a second, so it gates every push.
+      - name: Test
+        run: cargo test --release
+
+      # The server and the wasm module are separate feature combinations and
+      # have broken independently before -- the wasm one as recently as the
+      # commit that added this workflow.
+      - name: Build the local server (--features web)
+        run: cargo build --release --features web --bin xscalenet-web
+
+      - name: Type-check the wasm feature
+        run: cargo check --lib --no-default-features --features wasm
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Pinned on purpose. Clippy gains lints with every release, so running it
+      # on `stable` means a toolchain bump can turn this job red on code nobody
+      # touched -- which is how a gate stops being trusted. Bump this
+      # deliberately, with the fixes in the same commit. Reproduce locally with
+      #   rustup toolchain install 1.99 && cargo +1.99 clippy --release --all-targets
+      - uses: dtolnay/rust-toolchain@1.99
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --release --all-targets
+
+  # Deliberately no `cargo fmt --check`: the crate has never been
+  # rustfmt-formatted, and running it would rewrite 24 files. Worth doing, but
+  # as its own change rather than hidden inside an unrelated pull request.

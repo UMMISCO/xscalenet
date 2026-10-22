@@ -121,18 +121,16 @@ pub fn consensus(
             norm_sum += norm;
             norm_cnt += 1.0;
 
-            if info.ort {
-                if this_rank.is_some() {
-                    // Orientation from this method's eorient: 1->0, then /2.
-                    let mut o = el.edges[&idx].eorient;
-                    if o == 1.0 {
-                        o = 0.0;
-                    }
-                    let ortv = o / 2.0; // 2->1, -2->-1, 0->0
-                    let w = 1.0 - norm;
-                    num += w * ortv;
-                    den += w;
+            if info.ort && this_rank.is_some() {
+                // Orientation from this method's eorient: 1->0, then /2.
+                let mut o = el.edges[&idx].eorient;
+                if o == 1.0 {
+                    o = 0.0;
                 }
+                let ortv = o / 2.0; // 2->1, -2->-1, 0->0
+                let w = 1.0 - norm;
+                num += w * ortv;
+                den += w;
             }
 
             // ecorr: last method (in order) that inferred this edge wins.

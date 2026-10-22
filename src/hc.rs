@@ -150,16 +150,22 @@ impl Rng {
 
 /// Greedy hill climbing from the current DAG state until no move improves the
 /// score. Mutates `dag`; returns the resulting total score.
-fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize, maxp: usize) -> f64 {
-    let m = dag.m;
+///
+/// `scan` is the order in which candidate moves are visited. Since the search
+/// keeps the *first* best-scoring move, that order decides every tie — and it
+/// used to be the input column order, which made the result depend on it. The
+/// caller now supplies the order explicitly so it can be randomised and
+/// averaged over (see [`reconstruct`]); node indices themselves stay canonical,
+/// so the DAG and the score cache are shared across orderings.
+fn climb(dag: &mut Dag, sc: &mut Scorer, max_iter: usize, maxp: usize, scan: &[usize]) -> f64 {
     let mut score = dag.total_score(sc);
     for _ in 0..max_iter {
         let mut best_delta = 1e-10;
         // op: (kind, from, to). kind 0=add, 1=delete, 2=reverse.
         let mut best_op: Option<(u8, usize, usize)> = None;
 
-        for from in 0..m {
-            for to in 0..m {
+        for &from in scan {
+            for &to in scan {
                 if from == to {
                     continue;
                 }
@@ -269,6 +275,25 @@ fn perturb(dag: &mut Dag, rng: &mut Rng, n: usize) {
 
 /// Learn a Bayesian network by hill climbing and return the inferred arcs as
 /// oriented edges on the global pairs.
+///
+/// # Ordering consensus
+///
+/// Hill climbing keeps the first best-scoring move it finds, so the order in
+/// which it visits candidate moves decides every tie and steers the whole greedy
+/// path. Any *fixed* order makes the result a function of that order: scanning
+/// in column order makes the network depend on the input column order, and
+/// scanning in node-name order (xscalenet 0.2) makes it reproducible but still
+/// arbitrary — a taxonomic rename then changes edges.
+///
+/// With `orders > 1` the search is instead run under that many **random**
+/// variable orderings and the arcs are kept when they recur in at least
+/// `order_freq` of them. The orderings are drawn from `seed` alone (the caller
+/// derives it from the run seed and the subgraph index, neither of which depends
+/// on names or column positions), so the consensus is invariant to both renaming
+/// and reordering up to Monte-Carlo error, which shrinks as `orders` grows.
+///
+/// `orders <= 1` reproduces the single-ordering behaviour exactly.
+#[allow(clippy::too_many_arguments)]
 pub fn reconstruct(
     sub: &[usize],
     cols: &[Vec<u32>],
@@ -278,6 +303,8 @@ pub fn reconstruct(
     max_iter: usize,
     iss: f64,
     maxp: usize,
+    orders: usize,
+    order_freq: f64,
 ) -> Vec<SubEdge> {
     let m = sub.len();
     if m < 2 {
@@ -290,46 +317,88 @@ pub fn reconstruct(
     }
     let sub_active: Vec<usize> = active.iter().map(|&i| sub[i]).collect();
 
+    // One scorer for all orderings: node indices are canonical (`sub_active`
+    // positions) and only the *scan order* varies, so the BDeu cache is reused
+    // across orderings instead of being rebuilt `orders` times.
     let mut sc = Scorer::new(&sub_active, cols, levels, iss);
     let ma = sub_active.len();
-
-    let mut best = Dag::empty(ma);
-    let mut best_score = climb(&mut best, &mut sc, max_iter, maxp);
-
+    let orders = orders.max(1);
     let mut rng = Rng(seed | 1);
-    for _ in 0..restarts {
-        // Restart from a perturbation of the current best.
-        let mut cand = Dag {
-            m: ma,
-            edge: best.edge.clone(),
-        };
-        perturb(&mut cand, &mut rng, 1);
-        let s = climb(&mut cand, &mut sc, max_iter, maxp);
-        if s > best_score + 1e-10 {
-            best_score = s;
-            best = cand;
-        }
-    }
 
-    // Emit arcs. `sub_active` is ascending in global index, so local u<v means
-    // global sub_active[u] < sub_active[v].
-    let mut edges = Vec::new();
-    for u in 0..ma {
-        for v in 0..ma {
-            if best.edge[u][v] {
-                let (a, b, eorient) = if sub_active[u] < sub_active[v] {
-                    (sub_active[u], sub_active[v], 2) // forward a->b
-                } else {
-                    (sub_active[v], sub_active[u], -2) // backward b->a
-                };
-                edges.push(SubEdge {
-                    a,
-                    b,
-                    eorient,
-                    score: f64::NAN,
-                });
+    // Per unordered global pair: in how many orderings it was inferred, and how
+    // often in each direction.
+    let mut tally: BTreeMap<(usize, usize), (u32, u32, u32)> = BTreeMap::new();
+
+    for r in 0..orders {
+        // First ordering is the identity, so `orders == 1` is bit-for-bit the
+        // old single-ordering search.
+        let mut scan: Vec<usize> = (0..ma).collect();
+        if r > 0 {
+            for i in (1..ma).rev() {
+                scan.swap(i, rng.below(i + 1));
+            }
+        }
+
+        let mut best = Dag::empty(ma);
+        let mut best_score = climb(&mut best, &mut sc, max_iter, maxp, &scan);
+        for _ in 0..restarts {
+            // Restart from a perturbation of the current best.
+            let mut cand = Dag {
+                m: ma,
+                edge: best.edge.clone(),
+            };
+            perturb(&mut cand, &mut rng, 1);
+            let s = climb(&mut cand, &mut sc, max_iter, maxp, &scan);
+            if s > best_score + 1e-10 {
+                best_score = s;
+                best = cand;
+            }
+        }
+
+        for u in 0..ma {
+            for v in 0..ma {
+                if best.edge[u][v] {
+                    let (gu, gv) = (sub_active[u], sub_active[v]);
+                    let key = if gu < gv { (gu, gv) } else { (gv, gu) };
+                    let e = tally.entry(key).or_insert((0, 0, 0));
+                    e.0 += 1;
+                    if gu < gv {
+                        e.1 += 1; // forward a->b
+                    } else {
+                        e.2 += 1; // backward b->a
+                    }
+                }
             }
         }
     }
-    edges
+
+    // Each arc votes with the fraction of orderings that inferred it, rather
+    // than passing a hard within-subgraph threshold. `order_freq` is only a
+    // noise floor: arcs seen in fewer than that fraction of orderings are
+    // dropped outright. Orientation is the majority across orderings,
+    // unoriented on a tie — the convention `gather` already uses across
+    // subgraphs. With `orders == 1` every surviving weight is 1.0, so this is
+    // exactly the old binary vote.
+    let floor = order_freq.clamp(0.0, 1.0);
+    let n_orders = orders as f64;
+    tally
+        .into_iter()
+        .filter_map(|((a, b), (n, fwd, bwd))| {
+            let w = n as f64 / n_orders;
+            if w + 1e-12 < floor {
+                return None;
+            }
+            Some(SubEdge {
+                a,
+                b,
+                eorient: match fwd.cmp(&bwd) {
+                    std::cmp::Ordering::Greater => 2,
+                    std::cmp::Ordering::Less => -2,
+                    std::cmp::Ordering::Equal => 1,
+                },
+                score: f64::NAN,
+                weight: w,
+            })
+        })
+        .collect()
 }

@@ -88,9 +88,9 @@ fn main() {
 
     let mut out = String::new();
     out.push_str("{\n");
-    write!(
+    writeln!(
         out,
-        "  \"meta\": {{\"title\": \"ATC propagation — 10-node test network\", \"source\": \"Prifti et al. 2010 dynamicPropagation (validated)\", \"n_steps\": {}, \"converged_at\": {}}},\n",
+        "  \"meta\": {{\"title\": \"ATC propagation — 10-node test network\", \"source\": \"Prifti et al. 2010 dynamicPropagation (validated)\", \"n_steps\": {}, \"converged_at\": {}}},",
         trace.configs.len() - 1,
         converged_at.map(|s| s.to_string()).unwrap_or_else(|| "null".into())
     )
@@ -99,17 +99,17 @@ fn main() {
     // Themes.
     let tn: Vec<String> = themes.iter().map(|t| format!("\"{t}\"")).collect();
     let tc: Vec<String> = theme_colors.iter().map(|c| format!("\"{c}\"")).collect();
-    write!(out, "  \"themes\": [{}],\n", tn.join(", ")).unwrap();
-    write!(out, "  \"theme_colors\": [{}],\n", tc.join(", ")).unwrap();
+    writeln!(out, "  \"themes\": [{}],", tn.join(", ")).unwrap();
+    writeln!(out, "  \"theme_colors\": [{}],", tc.join(", ")).unwrap();
 
     // Nodes.
     out.push_str("  \"nodes\": [\n");
     for i in 0..n {
         let nm = &gm.nodes[i];
         let comma = if i + 1 < n { "," } else { "" };
-        write!(
+        writeln!(
             out,
-            "    {{\"id\": \"g{}\", \"community\": {}, \"degree\": {}, \"betweenness\": {}, \"atc\": {}, \"atc_last\": {}, \"m0\": {}}}{}\n",
+            "    {{\"id\": \"g{}\", \"community\": {}, \"degree\": {}, \"betweenness\": {}, \"atc\": {}, \"atc_last\": {}, \"m0\": {}}}{}",
             i + 1,
             nm.community,
             nm.degree,
@@ -127,7 +127,7 @@ fn main() {
     out.push_str("  \"edges\": [\n");
     for (k, &(a, b)) in edges.iter().enumerate() {
         let comma = if k + 1 < edges.len() { "," } else { "" };
-        write!(out, "    {{\"source\": \"g{}\", \"target\": \"g{}\"}}{}\n", a + 1, b + 1, comma).unwrap();
+        writeln!(out, "    {{\"source\": \"g{}\", \"target\": \"g{}\"}}{}", a + 1, b + 1, comma).unwrap();
     }
     out.push_str("  ],\n");
 
@@ -146,9 +146,9 @@ fn main() {
         } else {
             (num(trace.coinertia[p - 1]), arr(&trace.delta[p - 1]))
         };
-        write!(
+        writeln!(
             out,
-            "      {{\"step\": {p}, \"coinertia\": {coin}, \"config\": {config}, \"delta\": {delta}}}{comma}\n"
+            "      {{\"step\": {p}, \"coinertia\": {coin}, \"config\": {config}, \"delta\": {delta}}}{comma}"
         )
         .unwrap();
     }

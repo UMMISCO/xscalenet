@@ -10,6 +10,15 @@ embedded reconstruction methods into one robust network.
 > for accurate reconstruction of large biological networks.* BMC Bioinformatics
 > 2016;17(Suppl 16):493. [PMC5249011](https://pmc.ncbi.nlm.nih.gov/articles/PMC5249011/)
 
+## New here? Start with the training
+
+**[training/](training/)** is a hands-on course in two tracks — **[Track A —
+Use it](training/track-user.md)** (~3 h, no Rust) and **[Track B — Extend
+it](training/track-dev.md)** (~4 h, for contributors) — with exercises that all
+run on the bundled `pop2mat` fixture, and [worked
+solutions](training/solutions.md). The reference documents below are
+subject-first; the training is task-first and links into them.
+
 ## Read in this order
 
 1. **[algorithm.md](algorithm.md)** — the method: what problem it solves, the

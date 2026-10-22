@@ -60,6 +60,7 @@ pub fn reconstruct(sub: &[usize], mim_global: &[Vec<f64>], eps: f64) -> Vec<SubE
                     b: sub[j],
                     eorient: 1,
                     score: mim[i][j],
+                    weight: 1.0,
                 });
             }
         }

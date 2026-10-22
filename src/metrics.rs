@@ -465,6 +465,31 @@ fn louvain(g: &Graph) -> (Vec<usize>, f64) {
     (comm, q)
 }
 
+/// Newman modularity of a partition on the base graph.
+fn modularity(g: &Graph, comm: &[usize]) -> f64 {
+    let two_m: f64 = g.adj.iter().map(|a| a.iter().map(|&(_, w)| w).sum::<f64>()).sum();
+    if two_m == 0.0 {
+        return 0.0;
+    }
+    let k: Vec<f64> = g.adj.iter().map(|a| a.iter().map(|&(_, w)| w).sum()).collect();
+    let ncomm = comm.iter().copied().max().map(|c| c + 1).unwrap_or(0);
+    let mut inside = vec![0.0f64; ncomm]; // sum of edge weights inside community (counts both directions)
+    let mut tot = vec![0.0f64; ncomm]; // sum of strengths in community
+    for i in 0..g.n {
+        tot[comm[i]] += k[i];
+        for &(j, w) in &g.adj[i] {
+            if comm[j] == comm[i] {
+                inside[comm[i]] += w; // each undirected edge counted twice
+            }
+        }
+    }
+    let mut q = 0.0;
+    for c in 0..ncomm {
+        q += inside[c] / two_m - (tot[c] / two_m).powi(2);
+    }
+    q
+}
+
 // (placeholder helper removed)
 
 #[cfg(test)]
@@ -514,29 +539,4 @@ mod tests {
         assert!(bc[2] > bc[1] && bc[1] > bc[0]);
         assert!((m.nodes[0].betweenness - 0.0).abs() < 1e-12); // endpoints
     }
-}
-
-/// Newman modularity of a partition on the base graph.
-fn modularity(g: &Graph, comm: &[usize]) -> f64 {
-    let two_m: f64 = g.adj.iter().map(|a| a.iter().map(|&(_, w)| w).sum::<f64>()).sum();
-    if two_m == 0.0 {
-        return 0.0;
-    }
-    let k: Vec<f64> = g.adj.iter().map(|a| a.iter().map(|&(_, w)| w).sum()).collect();
-    let ncomm = comm.iter().copied().max().map(|c| c + 1).unwrap_or(0);
-    let mut inside = vec![0.0f64; ncomm]; // sum of edge weights inside community (counts both directions)
-    let mut tot = vec![0.0f64; ncomm]; // sum of strengths in community
-    for i in 0..g.n {
-        tot[comm[i]] += k[i];
-        for &(j, w) in &g.adj[i] {
-            if comm[j] == comm[i] {
-                inside[comm[i]] += w; // each undirected edge counted twice
-            }
-        }
-    }
-    let mut q = 0.0;
-    for c in 0..ncomm {
-        q += inside[c] / two_m - (tot[c] / two_m).powi(2);
-    }
-    q
 }

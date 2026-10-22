@@ -25,9 +25,23 @@
 //!   --atc-col NAME                annotation column to propagate (default: col 2)
 //!   --theme-network               build the multi-layer theme-proximity network
 //!   --json                        also export graph.json (nodes+metrics+edges+theme layer)
+//!   --legacy-lrw                  reproduce the pre-fix, column-order-dependent spectral step
+//!   --hc-orders 200               random variable orderings fused per subgraph (hill climbing)
+//!   --hc-order-freq 0.0           drop arcs seen in fewer than this fraction of orderings
+//!   (with --hc-orders > 1, --restart defaults to 0 unless given: see parse_args)
 
 use std::path::PathBuf;
 use std::process::exit;
+
+/// Random variable orderings fused per subgraph by the Bayesian step.
+///
+/// This is a *robustness* knob, not the source of label-invariance: the base
+/// order is already derived from the variables' own data (see
+/// `scalenet::run_method`), so renaming or reordering the input gives an
+/// identical network at any count. Fusing several orderings additionally stops
+/// the result resting on one arbitrary scan order, at the price of ordinary
+/// Monte-Carlo variation with the seed.
+const HC_ORDERS_DEFAULT: usize = 200;
 
 use xscalenet::analysis;
 use xscalenet::data::Dataset;
@@ -66,7 +80,8 @@ fn parse_args() -> Result<Args, String> {
              [--transpose] [--edges-only] [--max-clusters 5] [--maxp N] \
              [--max-iter 10000] [--iss 1.0] [--metrics] [--atc annot.tsv] \
              [--atc-col NAME] [--theme-network] [--json] [--scale-free] \
-             [--iterative-eigen]",
+             [--iterative-eigen] [--legacy-lrw] [--hc-orders 200] \
+             [--hc-order-freq 0.0]",
             argv.first().map(|s| s.as_str()).unwrap_or("xscalenet")
         ));
     }
@@ -96,7 +111,12 @@ fn parse_args() -> Result<Args, String> {
         iss: 1.0,
         maxp: usize::MAX,
         iterative_eigen: false,
+        legacy_lrw: false,
+        hc_orders: HC_ORDERS_DEFAULT,
+        hc_order_freq: 0.0,
     };
+    // Whether --restart was given explicitly; see the note below.
+    let mut restart_set = false;
 
     let mut i = 3;
     while i < argv.len() {
@@ -127,6 +147,11 @@ fn parse_args() -> Result<Args, String> {
             "--json" => json = true,
             "--scale-free" => scale_free = true,
             "--iterative-eigen" => params.iterative_eigen = true,
+            "--legacy-lrw" => params.legacy_lrw = true,
+            "--hc-orders" => params.hc_orders = value()?.parse().map_err(|e| format!("{e}"))?,
+            "--hc-order-freq" => {
+                params.hc_order_freq = value()?.parse().map_err(|e| format!("{e}"))?
+            }
             "--methods" => {
                 methods = value()?
                     .split(',')
@@ -153,11 +178,26 @@ fn parse_args() -> Result<Args, String> {
                     .collect::<Result<Vec<_>, _>>()?;
             }
             "--epsilon" => params.epsilon = value()?.parse().map_err(|e| format!("{e}"))?,
-            "--restart" => params.restart = value()?.parse().map_err(|e| format!("{e}"))?,
+            "--restart" => {
+                params.restart = value()?.parse().map_err(|e| format!("{e}"))?;
+                restart_set = true;
+            }
             "--seed" => params.seed = value()?.parse().map_err(|e| format!("{e}"))?,
             other => return Err(format!("unknown option: {other}")),
         }
         i += 1;
+    }
+
+    // Hill-climbing restarts and ordering consensus both exist to diversify the
+    // greedy search, and under ordering consensus the restarts are redundant:
+    // measured on the reference matrices, keeping 21 restarts alongside 400
+    // orderings *lowers* rename reproducibility (0.974-0.978 vs 0.988-0.995)
+    // while doubling the runtime, because each restart adds unaveraged random
+    // variation. So when orderings are in use and --restart was not given
+    // explicitly, default to none. An explicit --restart is always honoured, and
+    // --hc-orders 1 (or --legacy-lrw) keeps the published default of 21.
+    if params.hc_orders > 1 && !restart_set && !params.legacy_lrw {
+        params.restart = 0;
     }
 
     Ok(Args {

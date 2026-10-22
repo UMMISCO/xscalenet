@@ -1,6 +1,6 @@
 [package]
 name = "xscalenet"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Efficient Rust reimplementation of the ScaleNet network reconstruction + Spectral Consensus Strategy (core path)"
 license = "GPL-3.0-or-later"
@@ -31,6 +31,14 @@ web = ["parallel", "graphjson", "dep:axum", "dep:tokio", "dep:tower-http"]
 # In-browser reconstruction: compile the core to wasm32 with wasm-bindgen glue.
 # Build with: `cargo build --lib --no-default-features --features wasm --target wasm32-unknown-unknown`.
 wasm = ["graphjson", "dep:wasm-bindgen"]
+
+# The numerical core walks several parallel arrays with one shared index -- the
+# MI matrix and its degree vector, an eigenvector and its node names, a
+# configuration and its previous step. Clippy's iterator rewrite handles one
+# array at a time, so applying it here would split those loops apart and hide
+# the fact that the index is the same. Allowed deliberately, not by neglect.
+[lints.clippy]
+needless_range_loop = "allow"
 
 [dependencies]
 nalgebra = "0.33"
