@@ -10,7 +10,7 @@ exploring what comes out.
 
 [![CI](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/UMMISCO/xscalenet/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-2021_edition-dea584.svg?logo=rust&logoColor=white)](Cargo.toml)
+[![Rust](https://img.shields.io/badge/rust-2024_edition-dea584.svg?logo=rust&logoColor=white)](Cargo.toml)
 [![Validated against R](https://img.shields.io/badge/validated_against-R_ScaleNet-276DC3.svg?logo=r&logoColor=white)](docs/r-mapping.md)
 [![Layout invariant](https://img.shields.io/badge/reconstruction-layout_invariant-3fb950.svg)](tests/order_invariance.rs)
 [![Docs](https://img.shields.io/badge/docs-training_%26_reference-8957e5.svg)](docs/)
